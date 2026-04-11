@@ -1,0 +1,8 @@
+.idea
+/.env
+uv.lock
+/sdk_experiments_docs_generate.py
+/.local_tests/
+/.claude/
+/PLAN.md
+/dist/
