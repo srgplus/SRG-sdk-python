@@ -8,7 +8,7 @@ class PermissionsResource:
 
     def give(
         self, *, user_id: str, target_id: str, target_type: str, role_id: int
-    ) -> None:
+    ) -> dict | None:
         """
         Assign a role to a user on a target.
 
@@ -24,6 +24,10 @@ class PermissionsResource:
             role_id: Role ID to assign (e.g. ``1`` for Admin, ``2`` for Editor,
                 ``3`` for Viewer).
 
+        Returns:
+            The created permission record as a raw dict, or ``None`` if the
+            server returns no body.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
@@ -35,7 +39,7 @@ class PermissionsResource:
         )
         ```
         """
-        self._http.post(
+        return self._http.post(
             "/api/v1/permissions",
             json={
                 "userId": user_id,
@@ -369,7 +373,7 @@ class AsyncPermissionsResource:
 
     async def give(
         self, *, user_id: str, target_id: str, target_type: str, role_id: int
-    ) -> None:
+    ) -> dict | None:
         """
         Assign a role to a user on a target.
 
@@ -385,6 +389,10 @@ class AsyncPermissionsResource:
             role_id: Role ID to assign (e.g. ``1`` for Admin, ``2`` for Editor,
                 ``3`` for Viewer).
 
+        Returns:
+            The created permission record as a raw dict, or ``None`` if the
+            server returns no body.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
@@ -396,7 +404,7 @@ class AsyncPermissionsResource:
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             "/api/v1/permissions",
             json={
                 "userId": user_id,

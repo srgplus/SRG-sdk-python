@@ -159,7 +159,7 @@ class InvitationsResource:
         invitation_id: str,
         *,
         role_id: int | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update the role assigned to an existing invitation.
 
@@ -171,6 +171,9 @@ class InvitationsResource:
             target_id: ID of the target resource.
             invitation_id: ID of the invitation to update.
             role_id: New role ID to assign. Unchanged if not provided.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -186,7 +189,7 @@ class InvitationsResource:
         body: dict = {}
         if role_id is not None:
             body["roleId"] = role_id
-        self._http.put(
+        return self._http.put(
             f"/api/v1/invitations/{target_type}/{target_id}/{invitation_id}",
             json=body,
         )
@@ -368,7 +371,7 @@ class AsyncInvitationsResource:
         invitation_id: str,
         *,
         role_id: int | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update the role assigned to an existing invitation.
 
@@ -380,6 +383,9 @@ class AsyncInvitationsResource:
             target_id: ID of the target resource.
             invitation_id: ID of the invitation to update.
             role_id: New role ID to assign. Unchanged if not provided.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -395,7 +401,7 @@ class AsyncInvitationsResource:
         body: dict = {}
         if role_id is not None:
             body["roleId"] = role_id
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/invitations/{target_type}/{target_id}/{invitation_id}",
             json=body,
         )

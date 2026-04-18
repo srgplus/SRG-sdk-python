@@ -147,7 +147,7 @@ class PermissionGroupsResource:
         data = self._http.get(f"/api/v1/permission-groups/{group_id}")
         return GetPermissionGroup.model_validate(data)
 
-    def update(self, group_id: str, *, name: str) -> None:
+    def update(self, group_id: str, *, name: str) -> dict | None:
         """
         Update the name of a permission group.
 
@@ -158,6 +158,9 @@ class PermissionGroupsResource:
             group_id: ID of the permission group.
             name: New display name for the group.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
@@ -167,7 +170,9 @@ class PermissionGroupsResource:
         )
         ```
         """
-        self._http.put(f"/api/v1/permission-groups/{group_id}", json={"name": name})
+        return self._http.put(
+            f"/api/v1/permission-groups/{group_id}", json={"name": name}
+        )
 
     def delete(self, group_id: str) -> None:
         """
@@ -187,7 +192,7 @@ class PermissionGroupsResource:
         """
         self._http.delete(f"/api/v1/permission-groups/{group_id}")
 
-    def add_users(self, group_id: str, *, user_ids: builtins.list[str]) -> None:
+    def add_users(self, group_id: str, *, user_ids: builtins.list[str]) -> dict | None:
         """
         Add users to a permission group.
 
@@ -197,6 +202,9 @@ class PermissionGroupsResource:
         Args:
             group_id: ID of the permission group.
             user_ids: List of user IDs to add to the group.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -210,7 +218,7 @@ class PermissionGroupsResource:
         )
         ```
         """
-        self._http.post(
+        return self._http.post(
             f"/api/v1/permission-groups/{group_id}",
             json={"userIds": user_ids},
         )
@@ -367,7 +375,7 @@ class AsyncPermissionGroupsResource:
         data = await self._http.get(f"/api/v1/permission-groups/{group_id}")
         return GetPermissionGroup.model_validate(data)
 
-    async def update(self, group_id: str, *, name: str) -> None:
+    async def update(self, group_id: str, *, name: str) -> dict | None:
         """
         Update the name of a permission group.
 
@@ -378,6 +386,9 @@ class AsyncPermissionGroupsResource:
             group_id: ID of the permission group.
             name: New display name for the group.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
@@ -387,7 +398,7 @@ class AsyncPermissionGroupsResource:
             )
         ```
         """
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/permission-groups/{group_id}", json={"name": name}
         )
 
@@ -411,7 +422,9 @@ class AsyncPermissionGroupsResource:
         """
         await self._http.delete(f"/api/v1/permission-groups/{group_id}")
 
-    async def add_users(self, group_id: str, *, user_ids: builtins.list[str]) -> None:
+    async def add_users(
+        self, group_id: str, *, user_ids: builtins.list[str]
+    ) -> dict | None:
         """
         Add users to a permission group.
 
@@ -421,6 +434,9 @@ class AsyncPermissionGroupsResource:
         Args:
             group_id: ID of the permission group.
             user_ids: List of user IDs to add to the group.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -434,7 +450,7 @@ class AsyncPermissionGroupsResource:
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             f"/api/v1/permission-groups/{group_id}",
             json={"userIds": user_ids},
         )

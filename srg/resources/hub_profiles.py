@@ -489,7 +489,7 @@ class HubProfilesResource:
             return self.get(hub_profile_id)
         return result
 
-    def archive(self, hub_profile_id: str) -> None:
+    def archive(self, hub_profile_id: str) -> dict | None:
         """
         Archive a hub profile.
 
@@ -500,15 +500,18 @@ class HubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to archive.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.hub_profiles.archive("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
+        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
 
-    def restore(self, hub_profile_id: str) -> None:
+    def restore(self, hub_profile_id: str) -> dict | None:
         """
         Restore a previously archived hub profile.
 
@@ -518,13 +521,16 @@ class HubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to restore.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.hub_profiles.restore("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
+        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
 
     def delete(self, hub_profile_id: str) -> None:
         """
@@ -544,7 +550,7 @@ class HubProfilesResource:
         """
         self._http.delete(f"/api/v1/hub-profiles/{hub_profile_id}")
 
-    def join(self, hub_profile_id: str) -> None:
+    def join(self, hub_profile_id: str) -> dict | None:
         """
         Join a public hub profile as the current user.
 
@@ -554,13 +560,16 @@ class HubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to join.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.hub_profiles.join("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
+        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
 
     def filter(
         self,
@@ -623,7 +632,7 @@ class HubProfilesResource:
         data = self._http.post("/api/v1/hub-profiles/filter", json=body)
         return [HubProfileFilter.model_validate(item) for item in (data or [])]
 
-    def move_to_workspace(self, hub_profile_id: str, workspace_id: str) -> None:
+    def move_to_workspace(self, hub_profile_id: str, workspace_id: str) -> dict | None:
         """
         Move a hub profile to a different workspace.
 
@@ -634,6 +643,9 @@ class HubProfilesResource:
             hub_profile_id: ID of the hub profile to move.
             workspace_id: ID of the destination workspace.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
@@ -643,11 +655,11 @@ class HubProfilesResource:
         )
         ```
         """
-        self._http.post(
+        return self._http.post(
             f"/api/v1/hub-profiles/{hub_profile_id}/move-to/workspaces/{workspace_id}"
         )
 
-    def turn_on_community(self, hub_profile_id: str) -> None:
+    def turn_on_community(self, hub_profile_id: str) -> dict | None:
         """
         Enable community features for a hub profile.
 
@@ -658,13 +670,18 @@ class HubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to enable community for.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.hub_profiles.turn_on_community("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/turn-on-community")
+        return self._http.post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/turn-on-community"
+        )
 
 
 class AsyncHubProfilesResource:
@@ -1116,7 +1133,7 @@ class AsyncHubProfilesResource:
             return await self.get(hub_profile_id)
         return result
 
-    async def archive(self, hub_profile_id: str) -> None:
+    async def archive(self, hub_profile_id: str) -> dict | None:
         """
         Archive a hub profile.
 
@@ -1127,15 +1144,18 @@ class AsyncHubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to archive.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.hub_profiles.archive("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
+        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
 
-    async def restore(self, hub_profile_id: str) -> None:
+    async def restore(self, hub_profile_id: str) -> dict | None:
         """
         Restore a previously archived hub profile.
 
@@ -1144,13 +1164,16 @@ class AsyncHubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to restore.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.hub_profiles.restore("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
+        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
 
     async def delete(self, hub_profile_id: str) -> None:
         """
@@ -1170,7 +1193,7 @@ class AsyncHubProfilesResource:
         """
         await self._http.delete(f"/api/v1/hub-profiles/{hub_profile_id}")
 
-    async def join(self, hub_profile_id: str) -> None:
+    async def join(self, hub_profile_id: str) -> dict | None:
         """
         Join a public hub profile as the current user.
 
@@ -1179,13 +1202,16 @@ class AsyncHubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to join.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.hub_profiles.join("01965f7a-0000-7000-8000-000000000002")
         ```
         """
-        await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
+        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
 
     async def filter(
         self,
@@ -1242,7 +1268,9 @@ class AsyncHubProfilesResource:
         data = await self._http.post("/api/v1/hub-profiles/filter", json=body)
         return [HubProfileFilter.model_validate(item) for item in (data or [])]
 
-    async def move_to_workspace(self, hub_profile_id: str, workspace_id: str) -> None:
+    async def move_to_workspace(
+        self, hub_profile_id: str, workspace_id: str
+    ) -> dict | None:
         """
         Move a hub profile to a different workspace.
 
@@ -1251,6 +1279,9 @@ class AsyncHubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to move.
             workspace_id: ID of the destination workspace.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1261,11 +1292,11 @@ class AsyncHubProfilesResource:
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             f"/api/v1/hub-profiles/{hub_profile_id}/move-to/workspaces/{workspace_id}"
         )
 
-    async def turn_on_community(self, hub_profile_id: str) -> None:
+    async def turn_on_community(self, hub_profile_id: str) -> dict | None:
         """
         Enable community features for a hub profile.
 
@@ -1275,6 +1306,9 @@ class AsyncHubProfilesResource:
         Args:
             hub_profile_id: ID of the hub profile to enable community for.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
@@ -1283,6 +1317,6 @@ class AsyncHubProfilesResource:
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             f"/api/v1/hub-profiles/{hub_profile_id}/turn-on-community"
         )

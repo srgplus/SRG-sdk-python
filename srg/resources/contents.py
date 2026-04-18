@@ -580,7 +580,7 @@ class ContentsResource:
 
     # -- Content category management --
 
-    def add_to_categories(self, content_id: str, body: dict) -> None:
+    def add_to_categories(self, content_id: str, body: dict) -> dict | None:
         """
         Add a content item to one or more channel categories.
 
@@ -592,6 +592,9 @@ class ContentsResource:
             content_id: ID of the content item.
             body: Request body specifying which channel categories to add
                 the content to.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -610,9 +613,9 @@ class ContentsResource:
         )
         ```
         """
-        self._http.put("/api/v1/contents/channels/add", json=body)
+        return self._http.put("/api/v1/contents/channels/add", json=body)
 
-    def remove_from_categories(self, content_id: str, body: dict) -> None:
+    def remove_from_categories(self, content_id: str, body: dict) -> dict | None:
         """
         Remove a content item from one or more channel categories.
 
@@ -623,6 +626,9 @@ class ContentsResource:
             content_id: ID of the content item.
             body: Request body specifying which channel categories to remove
                 the content from.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -641,9 +647,9 @@ class ContentsResource:
         )
         ```
         """
-        self._http.put("/api/v1/contents/channels/categories/delete", json=body)
+        return self._http.put("/api/v1/contents/channels/categories/delete", json=body)
 
-    def move(self, content_id: str, body: dict) -> None:
+    def move(self, content_id: str, body: dict) -> dict | None:
         """
         Move a content item to a different channel category.
 
@@ -654,6 +660,9 @@ class ContentsResource:
             content_id: ID of the content item.
             body: Request body specifying the source and destination
                 category positions.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -669,13 +678,15 @@ class ContentsResource:
         )
         ```
         """
-        self._http.put(
+        return self._http.put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
     # -- Content sections --
 
-    def create_section(self, content_id: str, category_name: str, *, name: str) -> None:
+    def create_section(
+        self, content_id: str, category_name: str, *, name: str
+    ) -> dict | None:
         """
         Create a section in a content item's category.
 
@@ -687,24 +698,28 @@ class ContentsResource:
             category_name: Name slug of the category to add the section to.
             name: Display name of the new section.
 
+        Returns:
+            Raw dict containing the new section ID (e.g. ``{"id": "..."}``),
+            or ``None`` if no body is returned.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        client.contents.create_section(
+        result = client.contents.create_section(
             "01965f7a-0000-7000-8000-000000000005",
             "week-1",
             name="Day 1",
         )
         ```
         """
-        self._http.post(
+        return self._http.post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
 
     def update_section(
         self, content_id: str, category_name: str, section_id: str, *, name: str
-    ) -> None:
+    ) -> dict | None:
         """
         Update the name of a section in a content item's category.
 
@@ -713,6 +728,9 @@ class ContentsResource:
             category_name: Name slug of the category containing the section.
             section_id: ID of the section to update.
             name: New display name.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -725,7 +743,7 @@ class ContentsResource:
         )
         ```
         """
-        self._http.put(
+        return self._http.put(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}",
             json={"name": name},
         )
@@ -800,7 +818,9 @@ class ContentsResource:
             return ContentProgression()
         return ContentProgression.model_validate(data)
 
-    def patch_media_progression(self, media_id: str, *, last_watched_time: int) -> None:
+    def patch_media_progression(
+        self, media_id: str, *, last_watched_time: int
+    ) -> dict | None:
         """
         Update the current user's last watched position in a media asset.
 
@@ -812,6 +832,9 @@ class ContentsResource:
             media_id: ID of the media asset.
             last_watched_time: Playback position in seconds.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
@@ -821,7 +844,7 @@ class ContentsResource:
         )
         ```
         """
-        self._http.patch(
+        return self._http.patch(
             f"/api/v1/progressions/medias/{media_id}",
             json={"lastWatchedTime": last_watched_time},
         )
@@ -1445,7 +1468,7 @@ class AsyncContentsResource:
         )
         return [ContentSearch.model_validate(item) for item in (data or [])]
 
-    async def add_to_categories(self, content_id: str, body: dict) -> None:
+    async def add_to_categories(self, content_id: str, body: dict) -> dict | None:
         """
         Add a content item to one or more channel categories.
 
@@ -1453,6 +1476,9 @@ class AsyncContentsResource:
             content_id: ID of the content item.
             body: Request body specifying which channel categories to add
                 the content to.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1471,9 +1497,9 @@ class AsyncContentsResource:
             )
         ```
         """
-        await self._http.put("/api/v1/contents/channels/add", json=body)
+        return await self._http.put("/api/v1/contents/channels/add", json=body)
 
-    async def remove_from_categories(self, content_id: str, body: dict) -> None:
+    async def remove_from_categories(self, content_id: str, body: dict) -> dict | None:
         """
         Remove a content item from one or more channel categories.
 
@@ -1481,6 +1507,9 @@ class AsyncContentsResource:
             content_id: ID of the content item.
             body: Request body specifying which channel categories to remove
                 the content from.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1499,15 +1528,20 @@ class AsyncContentsResource:
             )
         ```
         """
-        await self._http.put("/api/v1/contents/channels/categories/delete", json=body)
+        return await self._http.put(
+            "/api/v1/contents/channels/categories/delete", json=body
+        )
 
-    async def move(self, content_id: str, body: dict) -> None:
+    async def move(self, content_id: str, body: dict) -> dict | None:
         """
         Move a content item to a different channel category.
 
         Args:
             content_id: ID of the content item.
             body: Request body with source and destination category positions.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1523,13 +1557,13 @@ class AsyncContentsResource:
             )
         ```
         """
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
     async def create_section(
         self, content_id: str, category_name: str, *, name: str
-    ) -> None:
+    ) -> dict | None:
         """
         Create a section in a content item's category.
 
@@ -1538,24 +1572,28 @@ class AsyncContentsResource:
             category_name: Name slug of the category.
             name: Display name of the new section.
 
+        Returns:
+            Raw dict containing the new section ID (e.g. ``{"id": "..."}``),
+            or ``None`` if no body is returned.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            await client.contents.create_section(
+            result = await client.contents.create_section(
                 "01965f7a-0000-7000-8000-000000000005",
                 "week-1",
                 name="Day 1",
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
 
     async def update_section(
         self, content_id: str, category_name: str, section_id: str, *, name: str
-    ) -> None:
+    ) -> dict | None:
         """
         Update the name of a section in a content item's category.
 
@@ -1564,6 +1602,9 @@ class AsyncContentsResource:
             category_name: Name slug of the category.
             section_id: ID of the section to update.
             name: New display name.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1576,7 +1617,7 @@ class AsyncContentsResource:
             )
         ```
         """
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}",
             json={"name": name},
         )
@@ -1644,13 +1685,16 @@ class AsyncContentsResource:
 
     async def patch_media_progression(
         self, media_id: str, *, last_watched_time: int
-    ) -> None:
+    ) -> dict | None:
         """
         Update the current user's last watched position in a media asset.
 
         Args:
             media_id: ID of the media asset.
             last_watched_time: Playback position in seconds.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1661,7 +1705,7 @@ class AsyncContentsResource:
             )
         ```
         """
-        await self._http.patch(
+        return await self._http.patch(
             f"/api/v1/progressions/medias/{media_id}",
             json={"lastWatchedTime": last_watched_time},
         )

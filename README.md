@@ -5,7 +5,7 @@ Python client for the [SRG+](https://srgplus.com) API — manage hub profiles, c
 ## Installation
 
 ```bash
-pip install srg
+pip install srgplus
 ```
 
 Requires Python 3.11+ and depends on `httpx` and `pydantic`.

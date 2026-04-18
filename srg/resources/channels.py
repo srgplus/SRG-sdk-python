@@ -211,7 +211,7 @@ class ChannelsResource:
         name: str,
         privacy: ChannelPrivacy | None = None,
         categories: builtins.list[CategoryToReorder] | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update a channel's name, privacy, and category order.
 
@@ -225,6 +225,9 @@ class ChannelsResource:
             privacy: New privacy setting. Unchanged if not provided.
             categories: New category ordering. Each entry specifies a category
                 ID and its new ``order`` index. Unchanged if not provided.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -253,9 +256,9 @@ class ChannelsResource:
         }
         if privacy is not None:
             body["privacy"] = privacy
-        self._http.put("/api/v1/channels", json=body)
+        return self._http.put("/api/v1/channels", json=body)
 
-    def archive(self, channel_id: str) -> None:
+    def archive(self, channel_id: str) -> dict | None:
         """
         Archive a channel.
 
@@ -265,13 +268,16 @@ class ChannelsResource:
         Args:
             channel_id: ID of the channel to archive.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.channels.archive("01965f7a-0000-7000-8000-000000000003")
         ```
         """
-        self._http.post(f"/api/v1/channels/{channel_id}/archive")
+        return self._http.post(f"/api/v1/channels/{channel_id}/archive")
 
     def delete(self, channel_id: str) -> None:
         """
@@ -362,7 +368,7 @@ class ChannelsResource:
         is_pinned: bool = False,
         notifications_enabled: bool = True,
         options: ChannelCategoryOptionsUpsert | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update a category's name, pin status, notifications, and display options.
 
@@ -377,6 +383,9 @@ class ChannelsResource:
             notifications_enabled: Whether notifications are enabled. Defaults
                 to True.
             options: Updated display and behaviour options.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -397,12 +406,12 @@ class ChannelsResource:
                 by_alias=True, exclude_none=True
             ),
         }
-        self._http.put(
+        return self._http.put(
             f"/api/v1/channels/{channel_id}/categories/{category_id}",
             json=body,
         )
 
-    def archive_category(self, channel_id: str, category_id: str) -> None:
+    def archive_category(self, channel_id: str, category_id: str) -> dict | None:
         """
         Archive a category.
 
@@ -413,6 +422,9 @@ class ChannelsResource:
             channel_id: ID of the channel the category belongs to.
             category_id: ID of the category to archive.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
@@ -422,7 +434,7 @@ class ChannelsResource:
         )
         ```
         """
-        self._http.post(f"/api/v1/channels/{channel_id}/{category_id}/archive")
+        return self._http.post(f"/api/v1/channels/{channel_id}/{category_id}/archive")
 
     def delete_category(self, channel_id: str, category_id: str) -> None:
         """
@@ -597,7 +609,7 @@ class ChannelsResource:
 
     def update_section(
         self, channel_id: str, category_id: str, section_id: str, *, name: str
-    ) -> None:
+    ) -> dict | None:
         """
         Update the name of a section.
 
@@ -608,6 +620,9 @@ class ChannelsResource:
             category_id: ID of the category containing the section.
             section_id: ID of the section to update.
             name: New display name for the section.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -620,7 +635,7 @@ class ChannelsResource:
         )
         ```
         """
-        self._http.put(
+        return self._http.put(
             f"/api/v1/channels/{channel_id}/{category_id}/sections/{section_id}",
             json={"name": name},
         )
@@ -660,7 +675,7 @@ class ChannelsResource:
         section_id: str,
         *,
         contents_ids: builtins.list[str],
-    ) -> None:
+    ) -> dict | None:
         """
         Add content items to a category section.
 
@@ -672,6 +687,9 @@ class ChannelsResource:
             category_id: ID of the category.
             section_id: ID of the section within the category.
             contents_ids: List of content IDs to add.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -687,7 +705,7 @@ class ChannelsResource:
         )
         ```
         """
-        self._http.post(
+        return self._http.post(
             f"/api/v1/channels/{channel_id}/{category_id}/{section_id}/content",
             json={"contentsIds": contents_ids},
         )
@@ -992,7 +1010,7 @@ class AsyncChannelsResource:
         name: str,
         privacy: ChannelPrivacy | None = None,
         categories: builtins.list[CategoryToReorder] | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update a channel's name, privacy, and category order.
 
@@ -1005,6 +1023,9 @@ class AsyncChannelsResource:
             name: New display name for the channel.
             privacy: New privacy setting. Unchanged if not provided.
             categories: New category ordering. Unchanged if not provided.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1027,9 +1048,9 @@ class AsyncChannelsResource:
         }
         if privacy is not None:
             body["privacy"] = privacy
-        await self._http.put("/api/v1/channels", json=body)
+        return await self._http.put("/api/v1/channels", json=body)
 
-    async def archive(self, channel_id: str) -> None:
+    async def archive(self, channel_id: str) -> dict | None:
         """
         Archive a channel.
 
@@ -1038,13 +1059,16 @@ class AsyncChannelsResource:
         Args:
             channel_id: ID of the channel to archive.
 
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
+
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.channels.archive("01965f7a-0000-7000-8000-000000000003")
         ```
         """
-        await self._http.post(f"/api/v1/channels/{channel_id}/archive")
+        return await self._http.post(f"/api/v1/channels/{channel_id}/archive")
 
     async def delete(self, channel_id: str) -> None:
         """
@@ -1132,7 +1156,7 @@ class AsyncChannelsResource:
         is_pinned: bool = False,
         notifications_enabled: bool = True,
         options: ChannelCategoryOptionsUpsert | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update a category's name, pin status, notifications, and display options.
 
@@ -1144,6 +1168,9 @@ class AsyncChannelsResource:
             notifications_enabled: Whether notifications are enabled.
                 Defaults to True.
             options: Updated display and behaviour options.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1163,18 +1190,21 @@ class AsyncChannelsResource:
                 by_alias=True, exclude_none=True
             ),
         }
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/channels/{channel_id}/categories/{category_id}",
             json=body,
         )
 
-    async def archive_category(self, channel_id: str, category_id: str) -> None:
+    async def archive_category(self, channel_id: str, category_id: str) -> dict | None:
         """
         Archive a category.
 
         Args:
             channel_id: ID of the channel.
             category_id: ID of the category to archive.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1185,7 +1215,9 @@ class AsyncChannelsResource:
             )
         ```
         """
-        await self._http.post(f"/api/v1/channels/{channel_id}/{category_id}/archive")
+        return await self._http.post(
+            f"/api/v1/channels/{channel_id}/{category_id}/archive"
+        )
 
     async def delete_category(self, channel_id: str, category_id: str) -> None:
         """
@@ -1341,7 +1373,7 @@ class AsyncChannelsResource:
 
     async def update_section(
         self, channel_id: str, category_id: str, section_id: str, *, name: str
-    ) -> None:
+    ) -> dict | None:
         """
         Update the name of a section.
 
@@ -1350,6 +1382,9 @@ class AsyncChannelsResource:
             category_id: ID of the category.
             section_id: ID of the section to update.
             name: New display name.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1362,7 +1397,7 @@ class AsyncChannelsResource:
             )
         ```
         """
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/channels/{channel_id}/{category_id}/sections/{section_id}",
             json={"name": name},
         )
@@ -1399,7 +1434,7 @@ class AsyncChannelsResource:
         section_id: str,
         *,
         contents_ids: builtins.list[str],
-    ) -> None:
+    ) -> dict | None:
         """
         Add content items to a category section.
 
@@ -1408,6 +1443,9 @@ class AsyncChannelsResource:
             category_id: ID of the category.
             section_id: ID of the section.
             contents_ids: List of content IDs to add.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -1420,7 +1458,7 @@ class AsyncChannelsResource:
             )
         ```
         """
-        await self._http.post(
+        return await self._http.post(
             f"/api/v1/channels/{channel_id}/{category_id}/{section_id}/content",
             json={"contentsIds": contents_ids},
         )

@@ -366,7 +366,7 @@ class WorkspacesResource:
         metadata: Any,
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update an automation action.
 
@@ -381,6 +381,9 @@ class WorkspacesResource:
             hub_profile_ids: New list of hub profile IDs to associate with.
                 Replaces the existing list.
             details: New description. Omit to clear the current description.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -399,7 +402,7 @@ class WorkspacesResource:
         ```
         """
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        self._http.put(
+        return self._http.put(
             f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
             json=body,
         )
@@ -758,7 +761,7 @@ class AsyncWorkspacesResource:
         metadata: Any,
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
-    ) -> None:
+    ) -> dict | None:
         """
         Update an automation action.
 
@@ -772,6 +775,9 @@ class AsyncWorkspacesResource:
             metadata: New metadata object (e.g. ``ProgressionUpdatedMetadata``).
             hub_profile_ids: New list of hub profile IDs. Replaces the existing list.
             details: New description. Omit to clear the current description.
+
+        Returns:
+            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
@@ -789,7 +795,7 @@ class AsyncWorkspacesResource:
         ```
         """
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        await self._http.put(
+        return await self._http.put(
             f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
             json=body,
         )
