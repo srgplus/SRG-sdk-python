@@ -63,6 +63,7 @@ from .content import (
     ContentUploadSignedUrl,
     ContentV2,
     ContentWidgetCreate,
+    CreatedSection,
     HubProfileWidgetCreate,
     LinkListCreate,
     MainPlayableAsset,
@@ -220,6 +221,7 @@ __all__ = [
     "CollectionProgressionStats",
     # content v2
     "ContentV2",
+    "CreatedSection",
     "MainPlayableAsset",
     "MediaProgression",
     "CollectionProgression",

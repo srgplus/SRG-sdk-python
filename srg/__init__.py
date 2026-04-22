@@ -50,6 +50,7 @@ from srg.schemas import (
     ContentSearch,
     ContentUploadSignedUrl,
     ContentV2,
+    CreatedSection,
     # content widgets
     ContentWidgetCreate,
     Cover,
@@ -240,6 +241,7 @@ __all__ = [
     "CollectionProgressionStats",
     # content v2 models
     "ContentV2",
+    "CreatedSection",
     "MainPlayableAsset",
     "MediaProgression",
     "CollectionProgression",

@@ -27,6 +27,7 @@ from srg.schemas.content import (
     ContentSearch,
     ContentUploadSignedUrl,
     ContentV2,
+    CreatedSection,
 )
 
 
@@ -580,105 +581,114 @@ class ContentsResource:
 
     # -- Content category management --
 
-    def add_to_categories(self, content_id: str, body: dict) -> dict | None:
+    def add_to_categories(
+        self,
+        content_id: str,
+        *,
+        channels_categories: list[ContentChannelUpsert],
+    ) -> None:
         """
         Add a content item to one or more channel categories.
 
-        Places the content into the specified channel categories. The request
-        body schema follows the backend API format (see backend source for
-        details).
-
         Args:
             content_id: ID of the content item.
-            body: Request body specifying which channel categories to add
-                the content to.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
+            channels_categories: Channel and category placements to add the
+                content to.
 
         Example:
         ```python
+        from srg.schemas.content import ContentChannelUpsert
+
         client = SRGClient(api_key="srgplus_your_key")
         client.contents.add_to_categories(
             "01965f7a-0000-7000-8000-000000000005",
-            body={
-                "contentId": "01965f7a-0000-7000-8000-000000000005",
-                "channels": [
-                    {
-                        "channelId": "01965f7a-0000-7000-8000-000000000003",
-                        "categoryIds": ["01965f7a-0000-7000-8000-000000000004"],
-                    }
-                ],
-            },
+            channels_categories=[
+                ContentChannelUpsert(
+                    channel_id="01965f7a-0000-7000-8000-000000000003",
+                    category_ids=["01965f7a-0000-7000-8000-000000000004"],
+                )
+            ],
         )
         ```
         """
-        return self._http.put("/api/v1/contents/channels/add", json=body)
+        body = {
+            "contentId": content_id,
+            "channelsCategories": _ser_list(channels_categories),
+        }
+        self._http.put("/api/v1/contents/channels/add", json=body)
 
-    def remove_from_categories(self, content_id: str, body: dict) -> dict | None:
+    def remove_from_categories(
+        self,
+        content_id: str,
+        *,
+        channels_categories: list[ContentChannelUpsert],
+    ) -> None:
         """
         Remove a content item from one or more channel categories.
 
-        Removes the content from the specified channel categories. The
-        content item itself is not deleted.
+        The content item itself is not deleted.
 
         Args:
             content_id: ID of the content item.
-            body: Request body specifying which channel categories to remove
+            channels_categories: Channel and category placements to remove
                 the content from.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
+        from srg.schemas.content import ContentChannelUpsert
+
         client = SRGClient(api_key="srgplus_your_key")
         client.contents.remove_from_categories(
             "01965f7a-0000-7000-8000-000000000005",
-            body={
-                "contentId": "01965f7a-0000-7000-8000-000000000005",
-                "channels": [
-                    {
-                        "channelId": "01965f7a-0000-7000-8000-000000000003",
-                        "categoryIds": ["01965f7a-0000-7000-8000-000000000004"],
-                    }
-                ],
-            },
+            channels_categories=[
+                ContentChannelUpsert(
+                    channel_id="01965f7a-0000-7000-8000-000000000003",
+                    category_ids=["01965f7a-0000-7000-8000-000000000004"],
+                )
+            ],
         )
         ```
         """
-        return self._http.put("/api/v1/contents/channels/categories/delete", json=body)
+        body = {
+            "contentId": content_id,
+            "channelsCategories": _ser_list(channels_categories),
+        }
+        self._http.put("/api/v1/contents/channels/categories/delete", json=body)
 
-    def move(self, content_id: str, body: dict) -> dict | None:
+    def move(
+        self,
+        content_id: str,
+        *,
+        channel_id: str,
+        category_id: str,
+        section_id: str,
+    ) -> None:
         """
         Move a content item to a different channel category.
 
-        Relocates the content from its current category position to a new
-        one within the same or a different channel.
-
         Args:
             content_id: ID of the content item.
-            body: Request body specifying the source and destination
-                category positions.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
+            channel_id: ID of the channel containing the target category.
+            category_id: ID of the destination category.
+            section_id: ID of the destination section within the category.
 
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         client.contents.move(
             "01965f7a-0000-7000-8000-000000000005",
-            body={
-                "contentId": "01965f7a-0000-7000-8000-000000000005",
-                "fromCategoryId": "01965f7a-0000-7000-8000-000000000004",
-                "toCategoryId": "01965f7a-0000-7000-8000-000000000013",
-                "channelId": "01965f7a-0000-7000-8000-000000000003",
-            },
+            channel_id="01965f7a-0000-7000-8000-000000000003",
+            category_id="01965f7a-0000-7000-8000-000000000013",
+            section_id="01965f7a-0000-7000-8000-000000000011",
         )
         ```
         """
-        return self._http.put(
+        body = {
+            "channelId": channel_id,
+            "categoryId": category_id,
+            "sectionId": section_id,
+        }
+        self._http.put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
@@ -686,7 +696,7 @@ class ContentsResource:
 
     def create_section(
         self, content_id: str, category_name: str, *, name: str
-    ) -> dict | None:
+    ) -> CreatedSection:
         """
         Create a section in a content item's category.
 
@@ -699,8 +709,7 @@ class ContentsResource:
             name: Display name of the new section.
 
         Returns:
-            Raw dict containing the new section ID (e.g. ``{"id": "..."}``),
-            or ``None`` if no body is returned.
+            CreatedSection with the ID of the newly created section.
 
         Example:
         ```python
@@ -710,12 +719,14 @@ class ContentsResource:
             "week-1",
             name="Day 1",
         )
+        print(result.id)
         ```
         """
-        return self._http.post(
+        data = self._http.post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
+        return CreatedSection.model_validate(data)
 
     def update_section(
         self, content_id: str, category_name: str, section_id: str, *, name: str
@@ -1468,102 +1479,122 @@ class AsyncContentsResource:
         )
         return [ContentSearch.model_validate(item) for item in (data or [])]
 
-    async def add_to_categories(self, content_id: str, body: dict) -> dict | None:
+    async def add_to_categories(
+        self,
+        content_id: str,
+        *,
+        channels_categories: list[ContentChannelUpsert],
+    ) -> None:
         """
         Add a content item to one or more channel categories.
 
         Args:
             content_id: ID of the content item.
-            body: Request body specifying which channel categories to add
-                the content to.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
+            channels_categories: Channel and category placements to add the
+                content to.
 
         Example:
         ```python
+        from srg.schemas.content import ContentChannelUpsert
+
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.contents.add_to_categories(
                 "01965f7a-0000-7000-8000-000000000005",
-                body={
-                    "contentId": "01965f7a-0000-7000-8000-000000000005",
-                    "channels": [
-                        {
-                            "channelId": "01965f7a-0000-7000-8000-000000000003",
-                            "categoryIds": ["01965f7a-0000-7000-8000-000000000004"],
-                        }
-                    ],
-                },
+                channels_categories=[
+                    ContentChannelUpsert(
+                        channel_id="01965f7a-0000-7000-8000-000000000003",
+                        category_ids=["01965f7a-0000-7000-8000-000000000004"],
+                    )
+                ],
             )
         ```
         """
-        return await self._http.put("/api/v1/contents/channels/add", json=body)
+        body = {
+            "contentId": content_id,
+            "channelsCategories": _ser_list(channels_categories),
+        }
+        await self._http.put("/api/v1/contents/channels/add", json=body)
 
-    async def remove_from_categories(self, content_id: str, body: dict) -> dict | None:
+    async def remove_from_categories(
+        self,
+        content_id: str,
+        *,
+        channels_categories: list[ContentChannelUpsert],
+    ) -> None:
         """
         Remove a content item from one or more channel categories.
 
+        The content item itself is not deleted.
+
         Args:
             content_id: ID of the content item.
-            body: Request body specifying which channel categories to remove
+            channels_categories: Channel and category placements to remove
                 the content from.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
 
         Example:
         ```python
+        from srg.schemas.content import ContentChannelUpsert
+
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.contents.remove_from_categories(
                 "01965f7a-0000-7000-8000-000000000005",
-                body={
-                    "contentId": "01965f7a-0000-7000-8000-000000000005",
-                    "channels": [
-                        {
-                            "channelId": "01965f7a-0000-7000-8000-000000000003",
-                            "categoryIds": ["01965f7a-0000-7000-8000-000000000004"],
-                        }
-                    ],
-                },
+                channels_categories=[
+                    ContentChannelUpsert(
+                        channel_id="01965f7a-0000-7000-8000-000000000003",
+                        category_ids=["01965f7a-0000-7000-8000-000000000004"],
+                    )
+                ],
             )
         ```
         """
-        return await self._http.put(
+        body = {
+            "contentId": content_id,
+            "channelsCategories": _ser_list(channels_categories),
+        }
+        await self._http.put(
             "/api/v1/contents/channels/categories/delete", json=body
         )
 
-    async def move(self, content_id: str, body: dict) -> dict | None:
+    async def move(
+        self,
+        content_id: str,
+        *,
+        channel_id: str,
+        category_id: str,
+        section_id: str,
+    ) -> None:
         """
         Move a content item to a different channel category.
 
         Args:
             content_id: ID of the content item.
-            body: Request body with source and destination category positions.
-
-        Returns:
-            ``None`` if no body is returned, otherwise a raw response dict.
+            channel_id: ID of the channel containing the target category.
+            category_id: ID of the destination category.
+            section_id: ID of the destination section within the category.
 
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.contents.move(
                 "01965f7a-0000-7000-8000-000000000005",
-                body={
-                    "contentId": "01965f7a-0000-7000-8000-000000000005",
-                    "fromCategoryId": "01965f7a-0000-7000-8000-000000000004",
-                    "toCategoryId": "01965f7a-0000-7000-8000-000000000013",
-                    "channelId": "01965f7a-0000-7000-8000-000000000003",
-                },
+                channel_id="01965f7a-0000-7000-8000-000000000003",
+                category_id="01965f7a-0000-7000-8000-000000000013",
+                section_id="01965f7a-0000-7000-8000-000000000011",
             )
         ```
         """
-        return await self._http.put(
+        body = {
+            "channelId": channel_id,
+            "categoryId": category_id,
+            "sectionId": section_id,
+        }
+        await self._http.put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
     async def create_section(
         self, content_id: str, category_name: str, *, name: str
-    ) -> dict | None:
+    ) -> CreatedSection:
         """
         Create a section in a content item's category.
 
@@ -1573,8 +1604,7 @@ class AsyncContentsResource:
             name: Display name of the new section.
 
         Returns:
-            Raw dict containing the new section ID (e.g. ``{"id": "..."}``),
-            or ``None`` if no body is returned.
+            CreatedSection with the ID of the newly created section.
 
         Example:
         ```python
@@ -1584,12 +1614,14 @@ class AsyncContentsResource:
                 "week-1",
                 name="Day 1",
             )
+            print(result.id)
         ```
         """
-        return await self._http.post(
+        data = await self._http.post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
+        return CreatedSection.model_validate(data)
 
     async def update_section(
         self, content_id: str, category_name: str, section_id: str, *, name: str

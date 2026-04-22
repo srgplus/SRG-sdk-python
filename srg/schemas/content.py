@@ -154,6 +154,10 @@ class CollectionProgression(ContentProgression):
     completed: int = 0
 
 
+class CreatedSection(SRGModel):
+    id: str
+
+
 class ContentV2(SRGModel):
     """GET /api/v2/contents/{contentId}"""
 
