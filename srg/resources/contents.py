@@ -28,6 +28,7 @@ from srg.schemas.content import (
     ContentUploadSignedUrl,
     ContentV2,
     CreatedSection,
+    SubcontentItem,
 )
 
 
@@ -785,6 +786,172 @@ class ContentsResource:
         """
         self._http.delete(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}"
+        )
+
+    # -- Subcontent (collection child items) --
+
+    def add_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        subcontent_ids: list[str],
+    ) -> None:
+        """
+        Add content items as subcontent inside a collection section.
+
+        After calling this the content becomes a Collection
+        (``IsCollection()`` returns true on the server side).
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section to add subcontent into.
+            subcontent_ids: IDs of the content items to nest inside the collection.
+
+        Example:
+        ```python
+        client = SRGClient(api_key="srgplus_your_key")
+        client.contents.add_subcontent(
+            "01965f7a-0000-7000-8000-000000000005",
+            "Content",
+            "01965f7a-0000-7000-8000-000000000011",
+            subcontent_ids=[
+                "01965f7a-0000-7000-8000-000000000020",
+                "01965f7a-0000-7000-8000-000000000021",
+            ],
+        )
+        ```
+        """
+        self._http.post(
+            f"/api/v1/contents/{content_id}/{category_name}/{section_id}/references",
+            json={"referenceIds": subcontent_ids},
+        )
+
+    def get_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        *,
+        page_size: int,
+        cursor: str | None = None,
+        order: str = "Asc",
+    ) -> CursorPagedList[SubcontentItem]:
+        """
+        Get paginated subcontent (child items) of a collection.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            page_size: Maximum number of items to return per page.
+            cursor: Opaque cursor from the previous response. Omit for the
+                first page.
+            order: Sort order — ``"Asc"`` (default) or ``"Desc"``.
+
+        Returns:
+            CursorPagedList[SubcontentItem] with items and an optional cursor
+            for the next page.
+
+        Example:
+        ```python
+        client = SRGClient(api_key="srgplus_your_key")
+        page = client.contents.get_subcontent(
+            "01965f7a-0000-7000-8000-000000000005",
+            "Content",
+            page_size=20,
+        )
+        for item in page.items:
+            print(item.id, item.name)
+        ```
+        """
+        params: dict = {"pageSize": page_size, "order": order}
+        if cursor is not None:
+            params["cursor"] = cursor
+        data = self._http.get(
+            f"/api/v1/contents/{content_id}/{category_name}/references",
+            params=params,
+        )
+        items = [SubcontentItem.model_validate(i) for i in (data.get("items") or [])]
+        return CursorPagedList[SubcontentItem](items=items, cursor=data.get("cursor"))
+
+    def delete_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        subcontent_id: str,
+    ) -> None:
+        """
+        Remove a subcontent item from a collection section.
+
+        The subcontent item itself is not deleted — only the link is removed.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section containing the subcontent.
+            subcontent_id: ID of the subcontent item to remove.
+
+        Example:
+        ```python
+        client = SRGClient(api_key="srgplus_your_key")
+        client.contents.delete_subcontent(
+            "01965f7a-0000-7000-8000-000000000005",
+            "Content",
+            "01965f7a-0000-7000-8000-000000000011",
+            "01965f7a-0000-7000-8000-000000000020",
+        )
+        ```
+        """
+        self._http.delete(
+            f"/api/v1/contents/{content_id}/{category_name}"
+            f"/{section_id}/references/{subcontent_id}",
+        )
+
+    def move_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        subcontent_id: str,
+        previous_subcontent_id: str | None = None,
+    ) -> None:
+        """
+        Reorder a subcontent item within a collection section.
+
+        Moves ``subcontent_id`` to the position immediately after
+        ``previous_subcontent_id``. Pass ``None`` to move it to the first
+        position.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section containing the subcontent.
+            subcontent_id: ID of the subcontent item to move.
+            previous_subcontent_id: ID of the item that should precede the
+                moved item. ``None`` moves it to the first position.
+
+        Example:
+        ```python
+        client = SRGClient(api_key="srgplus_your_key")
+        client.contents.move_subcontent(
+            "01965f7a-0000-7000-8000-000000000005",
+            "Content",
+            "01965f7a-0000-7000-8000-000000000011",
+            subcontent_id="01965f7a-0000-7000-8000-000000000021",
+            previous_subcontent_id="01965f7a-0000-7000-8000-000000000020",
+        )
+        ```
+        """
+        self._http.post(
+            f"/api/v1/contents/{content_id}/{category_name}"
+            f"/{section_id}/references/move",
+            json={
+                "referenceId": subcontent_id,
+                "previousReferenceId": previous_subcontent_id,
+            },
         )
 
     # -- Progressions --
@@ -1551,9 +1718,7 @@ class AsyncContentsResource:
             "contentId": content_id,
             "channelsCategories": _ser_list(channels_categories),
         }
-        await self._http.put(
-            "/api/v1/contents/channels/categories/delete", json=body
-        )
+        await self._http.put("/api/v1/contents/channels/categories/delete", json=body)
 
     async def move(
         self,
@@ -1677,6 +1842,172 @@ class AsyncContentsResource:
         """
         await self._http.delete(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}"
+        )
+
+    # -- Subcontent (collection child items) --
+
+    async def add_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        subcontent_ids: list[str],
+    ) -> None:
+        """
+        Add content items as subcontent inside a collection section.
+
+        After calling this the content becomes a Collection
+        (``IsCollection()`` returns true on the server side).
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section to add subcontent into.
+            subcontent_ids: IDs of the content items to nest inside the collection.
+
+        Example:
+        ```python
+        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+            await client.contents.add_subcontent(
+                "01965f7a-0000-7000-8000-000000000005",
+                "Content",
+                "01965f7a-0000-7000-8000-000000000011",
+                subcontent_ids=[
+                    "01965f7a-0000-7000-8000-000000000020",
+                    "01965f7a-0000-7000-8000-000000000021",
+                ],
+            )
+        ```
+        """
+        await self._http.post(
+            f"/api/v1/contents/{content_id}/{category_name}/{section_id}/references",
+            json={"referenceIds": subcontent_ids},
+        )
+
+    async def get_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        *,
+        page_size: int,
+        cursor: str | None = None,
+        order: str = "Asc",
+    ) -> CursorPagedList[SubcontentItem]:
+        """
+        Get paginated subcontent (child items) of a collection.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            page_size: Maximum number of items to return per page.
+            cursor: Opaque cursor from the previous response. Omit for the
+                first page.
+            order: Sort order — ``"Asc"`` (default) or ``"Desc"``.
+
+        Returns:
+            CursorPagedList[SubcontentItem] with items and an optional cursor
+            for the next page.
+
+        Example:
+        ```python
+        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+            page = await client.contents.get_subcontent(
+                "01965f7a-0000-7000-8000-000000000005",
+                "Content",
+                page_size=20,
+            )
+            for item in page.items:
+                print(item.id, item.name)
+        ```
+        """
+        params: dict = {"pageSize": page_size, "order": order}
+        if cursor is not None:
+            params["cursor"] = cursor
+        data = await self._http.get(
+            f"/api/v1/contents/{content_id}/{category_name}/references",
+            params=params,
+        )
+        items = [SubcontentItem.model_validate(i) for i in (data.get("items") or [])]
+        return CursorPagedList[SubcontentItem](items=items, cursor=data.get("cursor"))
+
+    async def delete_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        subcontent_id: str,
+    ) -> None:
+        """
+        Remove a subcontent item from a collection section.
+
+        The subcontent item itself is not deleted — only the link is removed.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section containing the subcontent.
+            subcontent_id: ID of the subcontent item to remove.
+
+        Example:
+        ```python
+        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+            await client.contents.delete_subcontent(
+                "01965f7a-0000-7000-8000-000000000005",
+                "Content",
+                "01965f7a-0000-7000-8000-000000000011",
+                "01965f7a-0000-7000-8000-000000000020",
+            )
+        ```
+        """
+        await self._http.delete(
+            f"/api/v1/contents/{content_id}/{category_name}"
+            f"/{section_id}/references/{subcontent_id}",
+        )
+
+    async def move_subcontent(
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        subcontent_id: str,
+        previous_subcontent_id: str | None = None,
+    ) -> None:
+        """
+        Reorder a subcontent item within a collection section.
+
+        Moves ``subcontent_id`` to the position immediately after
+        ``previous_subcontent_id``. Pass ``None`` to move it to the first
+        position.
+
+        Args:
+            content_id: ID of the collection content item.
+            category_name: Category name — ``"Content"`` or ``"Asset"``.
+            section_id: ID of the section containing the subcontent.
+            subcontent_id: ID of the subcontent item to move.
+            previous_subcontent_id: ID of the item that should precede the
+                moved item. ``None`` moves it to the first position.
+
+        Example:
+        ```python
+        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+            await client.contents.move_subcontent(
+                "01965f7a-0000-7000-8000-000000000005",
+                "Content",
+                "01965f7a-0000-7000-8000-000000000011",
+                subcontent_id="01965f7a-0000-7000-8000-000000000021",
+                previous_subcontent_id="01965f7a-0000-7000-8000-000000000020",
+            )
+        ```
+        """
+        await self._http.post(
+            f"/api/v1/contents/{content_id}/{category_name}"
+            f"/{section_id}/references/move",
+            json={
+                "referenceId": subcontent_id,
+                "previousReferenceId": previous_subcontent_id,
+            },
         )
 
     async def patch_content_progression(

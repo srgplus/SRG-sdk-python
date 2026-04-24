@@ -150,7 +150,7 @@ class SRGClient:
             attribute.
         :rtype: WorkspacesResource
         """
-        return WorkspacesResource(self._http)
+        return WorkspacesResource(self._http, workspace_id=self.workspace_id)
 
     @cached_property
     def assets(self) -> AssetsResource:

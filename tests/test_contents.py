@@ -544,3 +544,191 @@ class TestAsyncContentsFilterAll:
         ]
 
         assert [r.name for r in result] == ["Intro", "Intro Advanced"]
+
+
+SECTION_ID = "section-uuid-1"
+REFERENCE_ID = "ref-uuid-1"
+REFERENCE_ID_2 = "ref-uuid-2"
+CATEGORY_NAME = "Content"
+
+SUBCONTENT_ITEM_PAYLOAD = {
+    "$type": "Content",
+    "id": REFERENCE_ID,
+    "name": "Child Content",
+    "cursor": "cursor-abc",
+    "section": {
+        "$type": "Section",
+        "id": SECTION_ID,
+        "cursor": "sec-cursor",
+        "name": "Chapter 1",
+    },
+    "created": "2024-01-01T00:00:00Z",
+    "cover": None,
+    "privacy": "Public",
+    "previewText": None,
+    "progression": None,
+}
+
+
+class TestContentsSubcontent:
+    def test_add_subcontent(self, mock_http: Mock) -> None:
+        mock_http.post.return_value = None
+        resource = ContentsResource(mock_http)
+
+        resource.add_subcontent(
+            CONTENT_ID,
+            CATEGORY_NAME,
+            SECTION_ID,
+            subcontent_ids=[REFERENCE_ID, REFERENCE_ID_2],
+        )
+
+        mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}/{SECTION_ID}/references",
+            json={"referenceIds": [REFERENCE_ID, REFERENCE_ID_2]},
+        )
+
+    def test_get_subcontent_returns_page(self, mock_http: Mock) -> None:
+        mock_http.get.return_value = {
+            "items": [SUBCONTENT_ITEM_PAYLOAD],
+            "cursor": None,
+        }
+        resource = ContentsResource(mock_http)
+
+        page = resource.get_subcontent(CONTENT_ID, CATEGORY_NAME, page_size=10)
+
+        mock_http.get.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}/references",
+            params={"pageSize": 10, "order": "Asc"},
+        )
+        assert len(page.items) == 1
+        item = page.items[0]
+        assert item.id == REFERENCE_ID
+        assert item.name == "Child Content"
+        assert item.section.name == "Chapter 1"
+        assert page.cursor is None
+
+    def test_get_subcontent_with_cursor_and_order(self, mock_http: Mock) -> None:
+        mock_http.get.return_value = {"items": [], "cursor": "next"}
+        resource = ContentsResource(mock_http)
+
+        resource.get_subcontent(
+            CONTENT_ID, CATEGORY_NAME, page_size=5, cursor="prev", order="Desc"
+        )
+
+        params = mock_http.get.call_args[1]["params"]
+        assert params["cursor"] == "prev"
+        assert params["order"] == "Desc"
+        assert params["pageSize"] == 5
+
+    def test_delete_subcontent(self, mock_http: Mock) -> None:
+        mock_http.delete.return_value = None
+        resource = ContentsResource(mock_http)
+
+        resource.delete_subcontent(CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID)
+
+        mock_http.delete.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}"
+            f"/{SECTION_ID}/references/{REFERENCE_ID}",
+        )
+
+    def test_move_subcontent(self, mock_http: Mock) -> None:
+        mock_http.post.return_value = None
+        resource = ContentsResource(mock_http)
+
+        resource.move_subcontent(
+            CONTENT_ID,
+            CATEGORY_NAME,
+            SECTION_ID,
+            subcontent_id=REFERENCE_ID,
+            previous_subcontent_id=REFERENCE_ID_2,
+        )
+
+        mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}"
+            f"/{SECTION_ID}/references/move",
+            json={
+                "referenceId": REFERENCE_ID,
+                "previousReferenceId": REFERENCE_ID_2,
+            },
+        )
+
+    def test_move_subcontent_to_first_position(self, mock_http: Mock) -> None:
+        mock_http.post.return_value = None
+        resource = ContentsResource(mock_http)
+
+        resource.move_subcontent(
+            CONTENT_ID,
+            CATEGORY_NAME,
+            SECTION_ID,
+            subcontent_id=REFERENCE_ID,
+        )
+
+        body = mock_http.post.call_args[1]["json"]
+        assert body["previousReferenceId"] is None
+
+
+class TestAsyncContentsSubcontent:
+    async def test_add_subcontent(self, async_mock_http: AsyncMock) -> None:
+        async_mock_http.post.return_value = None
+        resource = AsyncContentsResource(async_mock_http)
+
+        await resource.add_subcontent(
+            CONTENT_ID,
+            CATEGORY_NAME,
+            SECTION_ID,
+            subcontent_ids=[REFERENCE_ID],
+        )
+
+        async_mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}/{SECTION_ID}/references",
+            json={"referenceIds": [REFERENCE_ID]},
+        )
+
+    async def test_get_subcontent_returns_page(
+        self, async_mock_http: AsyncMock
+    ) -> None:
+        async_mock_http.get.return_value = {
+            "items": [SUBCONTENT_ITEM_PAYLOAD],
+            "cursor": "next-page",
+        }
+        resource = AsyncContentsResource(async_mock_http)
+
+        page = await resource.get_subcontent(CONTENT_ID, CATEGORY_NAME, page_size=20)
+
+        assert len(page.items) == 1
+        assert page.items[0].id == REFERENCE_ID
+        assert page.cursor == "next-page"
+
+    async def test_delete_subcontent(self, async_mock_http: AsyncMock) -> None:
+        async_mock_http.delete.return_value = None
+        resource = AsyncContentsResource(async_mock_http)
+
+        await resource.delete_subcontent(
+            CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID
+        )
+
+        async_mock_http.delete.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}"
+            f"/{SECTION_ID}/references/{REFERENCE_ID}",
+        )
+
+    async def test_move_subcontent(self, async_mock_http: AsyncMock) -> None:
+        async_mock_http.post.return_value = None
+        resource = AsyncContentsResource(async_mock_http)
+
+        await resource.move_subcontent(
+            CONTENT_ID,
+            CATEGORY_NAME,
+            SECTION_ID,
+            subcontent_id=REFERENCE_ID,
+            previous_subcontent_id=REFERENCE_ID_2,
+        )
+
+        async_mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}"
+            f"/{SECTION_ID}/references/move",
+            json={
+                "referenceId": REFERENCE_ID,
+                "previousReferenceId": REFERENCE_ID_2,
+            },
+        )

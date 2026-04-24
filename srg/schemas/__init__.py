@@ -69,6 +69,8 @@ from .content import (
     MainPlayableAsset,
     MediaProgression,
     MediaWidgetCreate,
+    SubcontentItem,
+    SubcontentSection,
     TextWidgetCreate,
 )
 from .hub_profile import (
@@ -225,4 +227,7 @@ __all__ = [
     "MainPlayableAsset",
     "MediaProgression",
     "CollectionProgression",
+    # collection subcontent
+    "SubcontentSection",
+    "SubcontentItem",
 ]

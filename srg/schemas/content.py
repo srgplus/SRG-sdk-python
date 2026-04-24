@@ -158,6 +158,34 @@ class CreatedSection(SRGModel):
     id: str
 
 
+class SubcontentSection(SRGModel):
+    """Section that a subcontent item belongs to ($type: Section | SingleContentSection)."""
+
+    dollar_type: str | None = Field(None, alias="$type")
+    id: str
+    cursor: str
+    name: str | None = None
+
+
+class SubcontentItem(SRGModel):
+    """One subcontent item returned by GET /contents/{id}/{categoryName}/references.
+
+    Polymorphic ($type: Content | Media | Embed | Image | Video | File).
+    Common fields are mapped; type-specific fields are optional.
+    """
+
+    dollar_type: str | None = Field(None, alias="$type")
+    id: str
+    name: str
+    cursor: str
+    section: SubcontentSection
+    created: datetime | None = None
+    cover: ContentCover | None = None
+    privacy: str | None = None
+    preview_text: str | None = None
+    progression: ContentProgression | None = None
+
+
 class ContentV2(SRGModel):
     """GET /api/v2/contents/{contentId}"""
 

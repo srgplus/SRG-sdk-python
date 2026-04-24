@@ -41,10 +41,11 @@ def _build_action_body(
 
 
 class WorkspacesResource:
-    def __init__(self, http: SyncHTTPClient) -> None:
+    def __init__(self, http: SyncHTTPClient, workspace_id: str | None = None) -> None:
         self._http = http
+        self._workspace_id = workspace_id
 
-    def get(self, workspace_id: str) -> Workspace:
+    def get(self, workspace_id: str | None = None) -> Workspace:
         """
         Get a workspace by ID.
 
@@ -52,7 +53,7 @@ class WorkspacesResource:
         seat usage, subscription plan, and the list of hub profiles it contains.
 
         Args:
-            workspace_id: ID of the workspace to retrieve.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             Workspace object with subscription and hub profile details.
@@ -60,7 +61,7 @@ class WorkspacesResource:
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        workspace = client.workspaces.get("01965f7a-0000-7000-8000-000000000001")
+        workspace = client.workspaces.get()
         ```
 
         Example response:
@@ -93,12 +94,13 @@ class WorkspacesResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/workspaces/{workspace_id}")
+        wid = workspace_id or self._workspace_id
+        data = self._http.get(f"/api/v1/workspaces/{wid}")
         return Workspace.model_validate(data)
 
     def update(
         self,
-        workspace_id: str,
+        workspace_id: str | None = None,
         *,
         name: str,
         cover_image: str | Path | None = None,
@@ -117,7 +119,7 @@ class WorkspacesResource:
         so you can upload the image yourself.
 
         Args:
-            workspace_id: ID of the workspace to update.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             name: New display name for the workspace.
             cover_image: Local path or ``http(s)://`` URL of the new cover
                 image. Triggers auto-upload.
@@ -133,7 +135,6 @@ class WorkspacesResource:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
         workspace = client.workspaces.update(
-            "01965f7a-0000-7000-8000-000000000001",
             name="Acme Corp (New)",
             cover_image="/path/to/cover.jpg",
         )
@@ -159,6 +160,7 @@ class WorkspacesResource:
         )
         ```
         """
+        wid = workspace_id or self._workspace_id
         if cover_image is not None and cover is None:
             cover = FileUploadParameters(
                 extension=extension_from_source(cover_image),
@@ -167,17 +169,19 @@ class WorkspacesResource:
         body: dict = {"name": name}
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-        data = self._http.put(f"/api/v1/workspaces/{workspace_id}", json=body)
+        data = self._http.put(f"/api/v1/workspaces/{wid}", json=body)
         result = WorkspaceSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
             upload_to_signed_url(result.cover_signed_url.url, cover_image)
 
         if cover_image is not None:
-            return self.get(workspace_id)
+            return self.get(wid)
         return result
 
-    def get_hub_profiles(self, workspace_id: str) -> list[MinimalHubProfile]:
+    def get_hub_profiles(
+        self, workspace_id: str | None = None
+    ) -> list[MinimalHubProfile]:
         """
         Get all hub profiles in a workspace.
 
@@ -186,7 +190,7 @@ class WorkspacesResource:
         a specific profile.
 
         Args:
-            workspace_id: ID of the workspace.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             List of MinimalHubProfile objects.
@@ -194,9 +198,7 @@ class WorkspacesResource:
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        profiles = client.workspaces.get_hub_profiles(
-            "01965f7a-0000-7000-8000-000000000001"
-        )
+        profiles = client.workspaces.get_hub_profiles()
         ```
 
         Example response:
@@ -213,15 +215,16 @@ class WorkspacesResource:
         ]
         ```
         """
-        data = self._http.get(f"/api/v1/workspaces/{workspace_id}/hub-profiles")
+        wid = workspace_id or self._workspace_id
+        data = self._http.get(f"/api/v1/workspaces/{wid}/hub-profiles")
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     def create_action(
         self,
-        workspace_id: str,
+        workspace_id: str | None = None,
         *,
         title: str,
-        metadata: Any,
+        metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
     ) -> str:
@@ -234,7 +237,7 @@ class WorkspacesResource:
         ``ProgressionUpdatedMetadata``).
 
         Args:
-            workspace_id: ID of the workspace to attach the action to.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             title: Display title for the action.
             metadata: Action metadata object (e.g. ``ProgressionUpdatedMetadata``).
                 Must be a Pydantic model or a plain dict matching the backend schema.
@@ -251,7 +254,6 @@ class WorkspacesResource:
 
         client = SRGClient(api_key="srgplus_your_key")
         action_id = client.workspaces.create_action(
-            "01965f7a-0000-7000-8000-000000000001",
             title="Notify on completion",
             metadata=ProgressionUpdatedMetadata(
                 webhook_url="https://hooks.example.com/srg"
@@ -266,13 +268,14 @@ class WorkspacesResource:
         "01965f7a-0000-7000-8000-000000000040"
         ```
         """
+        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        data = self._http.post(f"/api/v1/workspaces/{workspace_id}/actions", json=body)
+        data = self._http.post(f"/api/v1/workspaces/{wid}/actions", json=body)
         if isinstance(data, dict):
             return data.get("id", "")
         return str(data or "")
 
-    def list_actions(self, workspace_id: str) -> list[MinimalAction]:
+    def list_actions(self, workspace_id: str | None = None) -> list[MinimalAction]:
         """
         List all automation actions for a workspace.
 
@@ -281,7 +284,7 @@ class WorkspacesResource:
         associations and metadata.
 
         Args:
-            workspace_id: ID of the workspace.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             List of MinimalAction objects.
@@ -289,7 +292,7 @@ class WorkspacesResource:
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        actions = client.workspaces.list_actions("01965f7a-0000-7000-8000-000000000001")
+        actions = client.workspaces.list_actions()
         ```
 
         Example response:
@@ -304,10 +307,11 @@ class WorkspacesResource:
         ]
         ```
         """
-        data = self._http.get(f"/api/v1/workspaces/{workspace_id}/actions")
+        wid = workspace_id or self._workspace_id
+        data = self._http.get(f"/api/v1/workspaces/{wid}/actions")
         return [MinimalAction.model_validate(item) for item in (data or [])]
 
-    def get_action(self, workspace_id: str, action_id: str) -> Action:
+    def get_action(self, action_id: str, *, workspace_id: str | None = None) -> Action:
         """
         Get an automation action by ID.
 
@@ -315,8 +319,8 @@ class WorkspacesResource:
         the list of associated hub profiles.
 
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to retrieve.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             Action object with metadata and hub profile associations.
@@ -324,10 +328,7 @@ class WorkspacesResource:
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        action = client.workspaces.get_action(
-            "01965f7a-0000-7000-8000-000000000001",
-            "01965f7a-0000-7000-8000-000000000040",
-        )
+        action = client.workspaces.get_action("01965f7a-0000-7000-8000-000000000040")
         ```
 
         Example response:
@@ -354,16 +355,17 @@ class WorkspacesResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/workspaces/{workspace_id}/actions/{action_id}")
+        wid = workspace_id or self._workspace_id
+        data = self._http.get(f"/api/v1/workspaces/{wid}/actions/{action_id}")
         return Action.model_validate(data)
 
     def update_action(
         self,
-        workspace_id: str,
         action_id: str,
         *,
+        workspace_id: str | None = None,
         title: str,
-        metadata: Any,
+        metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
     ) -> dict | None:
@@ -374,12 +376,11 @@ class WorkspacesResource:
         optional description. All fields are overwritten (not patched).
 
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to update.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             title: New display title.
             metadata: New metadata object (e.g. ``ProgressionUpdatedMetadata``).
-            hub_profile_ids: New list of hub profile IDs to associate with.
-                Replaces the existing list.
+            hub_profile_ids: New list of hub profile IDs. Replaces the existing list.
             details: New description. Omit to clear the current description.
 
         Returns:
@@ -391,7 +392,6 @@ class WorkspacesResource:
 
         client = SRGClient(api_key="srgplus_your_key")
         client.workspaces.update_action(
-            "01965f7a-0000-7000-8000-000000000001",
             "01965f7a-0000-7000-8000-000000000040",
             title="Notify on completion (updated)",
             metadata=ProgressionUpdatedMetadata(
@@ -401,13 +401,14 @@ class WorkspacesResource:
         )
         ```
         """
+        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
         return self._http.put(
-            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
+            f"/api/v1/workspaces/{wid}/actions/{action_id}",
             json=body,
         )
 
-    def delete_action(self, workspace_id: str, action_id: str) -> None:
+    def delete_action(self, action_id: str, *, workspace_id: str | None = None) -> None:
         """
         Delete an automation action.
 
@@ -415,26 +416,25 @@ class WorkspacesResource:
         that would have triggered it will no longer fire the webhook.
 
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to delete.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Example:
         ```python
         client = SRGClient(api_key="srgplus_your_key")
-        client.workspaces.delete_action(
-            "01965f7a-0000-7000-8000-000000000001",
-            "01965f7a-0000-7000-8000-000000000040",
-        )
+        client.workspaces.delete_action("01965f7a-0000-7000-8000-000000000040")
         ```
         """
-        self._http.delete(f"/api/v1/workspaces/{workspace_id}/actions/{action_id}")
+        wid = workspace_id or self._workspace_id
+        self._http.delete(f"/api/v1/workspaces/{wid}/actions/{action_id}")
 
 
 class AsyncWorkspacesResource:
-    def __init__(self, http: AsyncHTTPClient) -> None:
+    def __init__(self, http: AsyncHTTPClient, workspace_id: str | None = None) -> None:
         self._http = http
+        self._workspace_id = workspace_id
 
-    async def get(self, workspace_id: str) -> Workspace:
+    async def get(self, workspace_id: str | None = None) -> Workspace:
         """
         Get a workspace by ID.
 
@@ -442,7 +442,7 @@ class AsyncWorkspacesResource:
         seat usage, subscription plan, and the list of hub profiles it contains.
 
         Args:
-            workspace_id: ID of the workspace to retrieve.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             Workspace object with subscription and hub profile details.
@@ -450,9 +450,7 @@ class AsyncWorkspacesResource:
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            workspace = await client.workspaces.get(
-                "01965f7a-0000-7000-8000-000000000001"
-            )
+            workspace = await client.workspaces.get()
         ```
 
         Example response:
@@ -483,12 +481,13 @@ class AsyncWorkspacesResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v1/workspaces/{workspace_id}")
+        wid = workspace_id or self._workspace_id
+        data = await self._http.get(f"/api/v1/workspaces/{wid}")
         return Workspace.model_validate(data)
 
     async def update(
         self,
-        workspace_id: str,
+        workspace_id: str | None = None,
         *,
         name: str,
         cover_image: str | Path | None = None,
@@ -507,7 +506,7 @@ class AsyncWorkspacesResource:
         so you can upload the image yourself.
 
         Args:
-            workspace_id: ID of the workspace to update.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             name: New display name for the workspace.
             cover_image: Local path or ``http(s)://`` URL of the new cover
                 image. Triggers auto-upload.
@@ -523,7 +522,6 @@ class AsyncWorkspacesResource:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             workspace = await client.workspaces.update(
-                "01965f7a-0000-7000-8000-000000000001",
                 name="Acme Corp (New)",
                 cover_image="/path/to/cover.jpg",
             )
@@ -549,6 +547,7 @@ class AsyncWorkspacesResource:
         )
         ```
         """
+        wid = workspace_id or self._workspace_id
         if cover_image is not None and cover is None:
             cover = FileUploadParameters(
                 extension=extension_from_source(cover_image),
@@ -557,26 +556,24 @@ class AsyncWorkspacesResource:
         body: dict = {"name": name}
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-        data = await self._http.put(f"/api/v1/workspaces/{workspace_id}", json=body)
+        data = await self._http.put(f"/api/v1/workspaces/{wid}", json=body)
         result = WorkspaceSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
             await upload_to_signed_url_async(result.cover_signed_url.url, cover_image)
 
         if cover_image is not None:
-            return await self.get(workspace_id)
+            return await self.get(wid)
         return result
 
-    async def get_hub_profiles(self, workspace_id: str) -> list[MinimalHubProfile]:
+    async def get_hub_profiles(
+        self, workspace_id: str | None = None
+    ) -> list[MinimalHubProfile]:
         """
         Get all hub profiles in a workspace.
 
-        Returns a minimal representation of each hub profile that belongs to the
-        given workspace. Use ``hub_profiles.get(id)`` to fetch full details for
-        a specific profile.
-
         Args:
-            workspace_id: ID of the workspace.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             List of MinimalHubProfile objects.
@@ -584,9 +581,7 @@ class AsyncWorkspacesResource:
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            profiles = await client.workspaces.get_hub_profiles(
-                "01965f7a-0000-7000-8000-000000000001"
-            )
+            profiles = await client.workspaces.get_hub_profiles()
         ```
 
         Example response:
@@ -603,31 +598,26 @@ class AsyncWorkspacesResource:
         ]
         ```
         """
-        data = await self._http.get(f"/api/v1/workspaces/{workspace_id}/hub-profiles")
+        wid = workspace_id or self._workspace_id
+        data = await self._http.get(f"/api/v1/workspaces/{wid}/hub-profiles")
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     async def create_action(
         self,
-        workspace_id: str,
+        workspace_id: str | None = None,
         *,
         title: str,
-        metadata: Any,
+        metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
     ) -> str:
         """
         Create an automation action for a workspace.
 
-        Actions are triggered automatically by platform events such as a user
-        completing content. The ``metadata`` object defines the action type and
-        its configuration (e.g. a webhook URL for
-        ``ProgressionUpdatedMetadata``).
-
         Args:
-            workspace_id: ID of the workspace to attach the action to.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             title: Display title for the action.
             metadata: Action metadata object (e.g. ``ProgressionUpdatedMetadata``).
-                Must be a Pydantic model or a plain dict matching the backend schema.
             hub_profile_ids: IDs of hub profiles to associate the action with.
                 Defaults to all.
             details: Optional description of what the action does.
@@ -641,7 +631,6 @@ class AsyncWorkspacesResource:
 
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             action_id = await client.workspaces.create_action(
-                "01965f7a-0000-7000-8000-000000000001",
                 title="Notify on completion",
                 metadata=ProgressionUpdatedMetadata(
                     webhook_url="https://hooks.example.com/srg"
@@ -655,24 +644,21 @@ class AsyncWorkspacesResource:
         "01965f7a-0000-7000-8000-000000000040"
         ```
         """
+        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        data = await self._http.post(
-            f"/api/v1/workspaces/{workspace_id}/actions", json=body
-        )
+        data = await self._http.post(f"/api/v1/workspaces/{wid}/actions", json=body)
         if isinstance(data, dict):
             return data.get("id", "")
         return str(data or "")
 
-    async def list_actions(self, workspace_id: str) -> list[MinimalAction]:
+    async def list_actions(
+        self, workspace_id: str | None = None
+    ) -> list[MinimalAction]:
         """
         List all automation actions for a workspace.
 
-        Returns a minimal summary of every action configured on the workspace.
-        Use ``get_action`` to retrieve full details including hub profile
-        associations and metadata.
-
         Args:
-            workspace_id: ID of the workspace.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             List of MinimalAction objects.
@@ -680,9 +666,7 @@ class AsyncWorkspacesResource:
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            actions = await client.workspaces.list_actions(
-                "01965f7a-0000-7000-8000-000000000001"
-            )
+            actions = await client.workspaces.list_actions()
         ```
 
         Example response:
@@ -697,19 +681,19 @@ class AsyncWorkspacesResource:
         ]
         ```
         """
-        data = await self._http.get(f"/api/v1/workspaces/{workspace_id}/actions")
+        wid = workspace_id or self._workspace_id
+        data = await self._http.get(f"/api/v1/workspaces/{wid}/actions")
         return [MinimalAction.model_validate(item) for item in (data or [])]
 
-    async def get_action(self, workspace_id: str, action_id: str) -> Action:
+    async def get_action(
+        self, action_id: str, *, workspace_id: str | None = None
+    ) -> Action:
         """
         Get an automation action by ID.
 
-        Retrieves the full details of an action, including its metadata and
-        the list of associated hub profiles.
-
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to retrieve.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Returns:
             Action object with metadata and hub profile associations.
@@ -718,8 +702,7 @@ class AsyncWorkspacesResource:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             action = await client.workspaces.get_action(
-                "01965f7a-0000-7000-8000-000000000001",
-                "01965f7a-0000-7000-8000-000000000040",
+                "01965f7a-0000-7000-8000-000000000040"
             )
         ```
 
@@ -747,30 +730,26 @@ class AsyncWorkspacesResource:
         )
         ```
         """
-        data = await self._http.get(
-            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
-        )
+        wid = workspace_id or self._workspace_id
+        data = await self._http.get(f"/api/v1/workspaces/{wid}/actions/{action_id}")
         return Action.model_validate(data)
 
     async def update_action(
         self,
-        workspace_id: str,
         action_id: str,
         *,
+        workspace_id: str | None = None,
         title: str,
-        metadata: Any,
+        metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
         details: str | None = None,
     ) -> dict | None:
         """
         Update an automation action.
 
-        Replaces the action's title, metadata, hub profile associations, and
-        optional description. All fields are overwritten (not patched).
-
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to update.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
             title: New display title.
             metadata: New metadata object (e.g. ``ProgressionUpdatedMetadata``).
             hub_profile_ids: New list of hub profile IDs. Replaces the existing list.
@@ -785,7 +764,6 @@ class AsyncWorkspacesResource:
 
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.workspaces.update_action(
-                "01965f7a-0000-7000-8000-000000000001",
                 "01965f7a-0000-7000-8000-000000000040",
                 title="Notify on completion (updated)",
                 metadata=ProgressionUpdatedMetadata(
@@ -794,32 +772,30 @@ class AsyncWorkspacesResource:
             )
         ```
         """
+        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
         return await self._http.put(
-            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
+            f"/api/v1/workspaces/{wid}/actions/{action_id}",
             json=body,
         )
 
-    async def delete_action(self, workspace_id: str, action_id: str) -> None:
+    async def delete_action(
+        self, action_id: str, *, workspace_id: str | None = None
+    ) -> None:
         """
         Delete an automation action.
 
-        Permanently removes the action from the workspace. Any future events
-        that would have triggered it will no longer fire the webhook.
-
         Args:
-            workspace_id: ID of the workspace.
             action_id: ID of the action to delete.
+            workspace_id: ID of the workspace. Uses the client's default if omitted.
 
         Example:
         ```python
         async with AsyncSRGClient(api_key="srgplus_your_key") as client:
             await client.workspaces.delete_action(
-                "01965f7a-0000-7000-8000-000000000001",
-                "01965f7a-0000-7000-8000-000000000040",
+                "01965f7a-0000-7000-8000-000000000040"
             )
         ```
         """
-        await self._http.delete(
-            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
-        )
+        wid = workspace_id or self._workspace_id
+        await self._http.delete(f"/api/v1/workspaces/{wid}/actions/{action_id}")
