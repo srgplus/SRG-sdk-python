@@ -39,9 +39,51 @@ from srg import AsyncSRGClient
 async def main():
     async with AsyncSRGClient(api_key="srgplus_...") as client:
         channels = await client.channels.list(hub_profile_id="hp-id")
+        # workspace_id is fetched lazily on first access:
+        ws_id = await client.get_workspace_id()
 
 asyncio.run(main())
 ```
+
+## Per-request API keys (multi-tenant servers)
+
+A single `SRGClient` / `AsyncSRGClient` can serve any number of workspaces from
+one shared `httpx` connection pool. Bind the key per call instead of per
+client:
+
+```python
+from srg import SRGClient
+
+client = SRGClient()  # no eager bootstrap, no default key
+
+# Option A — scoped clone (returns a thin wrapper that reuses the pool)
+scoped = client.with_api_key("srgplus_workspace_a")
+scoped.hub_profiles.list()
+
+# Option C — context manager
+with client.use_api_key("srgplus_workspace_b"):
+    client.hub_profiles.list()
+```
+
+The same patterns work on `AsyncSRGClient`:
+
+```python
+async with AsyncSRGClient() as client:
+    async with client.use_api_key("srgplus_workspace_a"):
+        await client.hub_profiles.list()
+
+    scoped = client.with_api_key("srgplus_workspace_b")
+    await scoped.hub_profiles.list()
+```
+
+Implementation detail: an internal `contextvars.ContextVar` carries the active
+key through the call stack, so `with_api_key` / `use_api_key` are safe under
+`asyncio` and threaded servers. Each request adds its own `Authorization`
+header — the underlying `httpx.Client` is shared.
+
+When you call `SRGClient(api_key=...)` the eager way, that key is used as the
+default for every request that doesn't have one bound — so existing single-key
+code continues to work unchanged.
 
 ## Configuration
 
