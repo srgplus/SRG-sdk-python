@@ -35,6 +35,20 @@ set `SRG_API_KEY`), that key becomes the default for the lifetime of the
 client and `client.workspace_id` is fetched eagerly — exactly as it did in
 0.1.x.
 
+> **Multi-tenant gotcha — `workspace_id` is `None` without a default key.**
+> When `SRGClient()` is constructed without an `api_key` (and no
+> `SRG_API_KEY` env var is set), there is no eager bootstrap, so
+> `client.workspace_id` stays `None`. Resource methods that build URLs
+> from the cached id (e.g. `client.hub_profiles.list()` →
+> `/api/v1/workspaces/None/...`) will fail. This is by design: the
+> per-request flow via `with_api_key()` / `use_api_key()` works because
+> the upstream HTTP layer carries the auth and the resource methods that
+> participate in that flow accept a workspace id explicitly (e.g.
+> `scoped.workspaces.list_actions("ws-id")`). If you need
+> `client.hub_profiles`-style attribute access in a multi-tenant process,
+> construct one client per tenant with their key, or pass the workspace
+> id through the resource call.
+
 <a id="srg._client.SRGClient"></a>
 
 ## SRGClient Objects

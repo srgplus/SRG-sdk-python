@@ -94,7 +94,7 @@ class SRGClient:
             self._workspace_id = self._bootstrap_workspace()
 
     def _bootstrap_workspace(self) -> str:
-        raw: list[dict[str, object]] =self._http.get("/api/v1/workspaces") or []
+        raw: list[dict[str, object]] = self._http.get("/api/v1/workspaces") or []
         if not raw:
             raise SRGError("No workspaces found for this API key")
         first = raw[0]
@@ -280,7 +280,9 @@ class AsyncSRGClient:
         self._workspace_id: str | None = None
 
     async def _bootstrap_workspace(self) -> str:
-        raw: list[dict[str, object]] =await self._http.get("/api/v1/workspaces") or []
+        raw: list[dict[str, object]] = (
+            await self._http.get("/api/v1/workspaces") or []
+        )
         if not raw:
             raise SRGError("No workspaces found for this API key")
         first = raw[0]
@@ -385,6 +387,12 @@ class _ScopedAsyncSRGClient:
             yield self
         finally:
             _active_api_key.reset(token)
+
+    async def __aenter__(self) -> "_ScopedAsyncSRGClient":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self._parent.aclose()
 
 
 class _BoundAsyncResource:

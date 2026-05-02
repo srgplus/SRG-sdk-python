@@ -164,6 +164,26 @@ class TestAsyncWithApiKey:
         await client.aclose()
 
     @respx.mock
+    async def test_async_with_api_key_supports_async_with(self) -> None:
+        # Regression test (SRGDEV-22): ``async with client.with_api_key(key)``
+        # must enter/exit cleanly and the bound key must be used inside.
+        respx.get(f"{_BASE_URL}/api/v1/workspaces/ws-default/actions").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        client = AsyncSRGClient(base_url=_BASE_URL)
+        async with client.with_api_key("srgplus_async_with") as scoped:
+            await scoped.workspaces.list_actions("ws-default")
+
+        assert (
+            respx.calls.last.request.headers["Authorization"]
+            == "Bearer srgplus_async_with"
+        )
+        # ``__aexit__`` closed the parent — opening another scoped view on
+        # the same client after the block must not be expected to work; the
+        # test purpose is just to assert the protocol is supported.
+
+    @respx.mock
     async def test_two_async_scoped_clients_send_different_keys(self) -> None:
         respx.get(f"{_BASE_URL}/api/v1/workspaces/ws-default/actions").mock(
             return_value=httpx.Response(200, json=[])
