@@ -2,6 +2,53 @@
 
 # srg.\_client
 
+## Per-request API keys (since 0.2.0)
+
+Both `SRGClient` and `AsyncSRGClient` support binding a workspace API key
+per call instead of per client. This lets one process share a single
+`httpx` connection pool across any number of workspaces — useful for
+hosted MCP servers and multi-tenant agents.
+
+| Helper | Description |
+|--------|-------------|
+| `SRGClient(api_key=None)` | Construct without a default key — every request must run inside a binding. |
+| `client.with_api_key(key)` | Return a scoped clone that pins `key` for every call (option A). |
+| `client.use_api_key(key)` | Sync context manager — binds `key` for the `with` block (option C). |
+| `await async_client.use_api_key(key)` | Async context manager equivalent. |
+| `async_client.with_api_key(key)` | Scoped clone (async). |
+| `await async_client.get_workspace_id()` | Lazy bootstrap; the async client never fetches workspaces eagerly. |
+
+Example:
+
+```python
+client = SRGClient()  # no eager bootstrap
+
+scoped = client.with_api_key("srgplus_workspace_a")
+scoped.hub_profiles.list()
+
+with client.use_api_key("srgplus_workspace_b"):
+    client.hub_profiles.list()
+```
+
+Backward compatibility: if you pass `SRGClient(api_key="srgplus_...")` (or
+set `SRG_API_KEY`), that key becomes the default for the lifetime of the
+client and `client.workspace_id` is fetched eagerly — exactly as it did in
+0.1.x.
+
+> **Multi-tenant gotcha — `workspace_id` is `None` without a default key.**
+> When `SRGClient()` is constructed without an `api_key` (and no
+> `SRG_API_KEY` env var is set), there is no eager bootstrap, so
+> `client.workspace_id` stays `None`. Resource methods that build URLs
+> from the cached id (e.g. `client.hub_profiles.list()` →
+> `/api/v1/workspaces/None/...`) will fail. This is by design: the
+> per-request flow via `with_api_key()` / `use_api_key()` works because
+> the upstream HTTP layer carries the auth and the resource methods that
+> participate in that flow accept a workspace id explicitly (e.g.
+> `scoped.workspaces.list_actions("ws-id")`). If you need
+> `client.hub_profiles`-style attribute access in a multi-tenant process,
+> construct one client per tenant with their key, or pass the workspace
+> id through the resource call.
+
 <a id="srg._client.SRGClient"></a>
 
 ## SRGClient Objects
@@ -15,7 +62,9 @@ Synchronous SRG SDK client.
 Parameters
 ----------
 api_key:
-    Workspace API key (Bearer token).  Falls back to ``SRG_API_KEY`` env var.
+    Optional default workspace API key (Bearer token). Falls back to
+    ``SRG_API_KEY`` env var. When omitted, every request must run inside a
+    ``with_api_key`` / ``use_api_key`` binding.
 base_url:
     Base URL for the API gateway.  Falls back to ``SRG_BASE_URL`` env var,
     then defaults to ``https://gateway.srgplus.com``.
@@ -28,6 +77,11 @@ Example
 
     client = SRGClient(api_key="srgplus_...")
     profiles = client.hub_profiles.list()
+
+    # multi-tenant server pattern
+    pool = SRGClient()
+    with pool.use_api_key("srgplus_other_workspace"):
+        pool.hub_profiles.list()
 
 <a id="srg._client.SRGClient.users"></a>
 
@@ -216,12 +270,18 @@ class AsyncSRGClient()
 Asynchronous SRG SDK client (identical API to :class:`SRGClient`
 but all methods are coroutines).
 
+Unlike :class:`SRGClient`, the async client never fetches workspaces in its
+constructor. Use ``await client.get_workspace_id()`` to fire the bootstrap
+lazily; ``client.workspace_id`` returns the cached value (or ``None`` if it
+hasn't been fetched yet) without raising.
+
 Example
 -------
 ::
 
     async with AsyncSRGClient(api_key="srgplus_...") as client:
         profiles = await client.hub_profiles.list()
+        ws_id = await client.get_workspace_id()
 
 <a id="srg._client.AsyncSRGClient.users"></a>
 
