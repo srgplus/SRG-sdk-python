@@ -18,9 +18,13 @@ UPLOAD_SIGNED_URL_PAYLOAD = {
 class TestContentsCreate:
     def test_post_with_required_fields(self, mock_http: Mock) -> None:
         mock_http.post.return_value = UPLOAD_SIGNED_URL_PAYLOAD
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.create(name="My Content", hub_profile_id=HUB_PROFILE_ID)
+        result = resource.create(
+            name="My Content",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
 
         mock_http.post.assert_called_once()
         path, kwargs = mock_http.post.call_args[0][0], mock_http.post.call_args[1]
@@ -32,12 +36,13 @@ class TestContentsCreate:
 
     def test_post_with_channels(self, mock_http: Mock) -> None:
         mock_http.post.return_value = UPLOAD_SIGNED_URL_PAYLOAD
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         resource.create(
             name="X",
             hub_profile_id=HUB_PROFILE_ID,
             channels=[ContentChannelUpsert(channel_id="ch-1", category_ids=["cat-1"])],
+            workspace_id="workspace-uuid-1",
         )
 
         body = mock_http.post.call_args[1]["json"]
@@ -45,8 +50,10 @@ class TestContentsCreate:
 
     def test_privacy_default_is_preview(self, mock_http: Mock) -> None:
         mock_http.post.return_value = UPLOAD_SIGNED_URL_PAYLOAD
-        resource = ContentsResource(mock_http)
-        resource.create(name="X", hub_profile_id=HUB_PROFILE_ID)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+        resource.create(
+            name="X", hub_profile_id=HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+        )
         assert mock_http.post.call_args[1]["json"]["privacy"] == "Preview"
 
 
@@ -55,9 +62,9 @@ class TestContentsGet:
         self, mock_http: Mock, content_payload: dict
     ) -> None:
         mock_http.get.return_value = content_payload
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.get(CONTENT_ID)
+        result = resource.get(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         mock_http.get.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}", params=None
@@ -69,9 +76,11 @@ class TestContentsGet:
         self, mock_http: Mock, content_payload: dict
     ) -> None:
         mock_http.get.return_value = content_payload
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.get(CONTENT_ID, hub_profile_id=HUB_PROFILE_ID)
+        resource.get(
+            CONTENT_ID, hub_profile_id=HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+        )
 
         mock_http.get.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}",
@@ -82,9 +91,11 @@ class TestContentsGet:
 class TestContentsFilter:
     def test_filter_builds_correct_body(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"items": [], "cursor": None}
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.filter(HUB_PROFILE_ID, page_size=20)
+        result = resource.filter(
+            HUB_PROFILE_ID, page_size=20, workspace_id="workspace-uuid-1"
+        )
 
         body = mock_http.post.call_args[1]["json"]
         assert body["pageSize"] == 20
@@ -95,19 +106,23 @@ class TestContentsFilter:
 
     def test_filter_with_cursor(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"items": [], "cursor": None}
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.filter(HUB_PROFILE_ID, page_size=10, cursor="abc")
+        resource.filter(
+            HUB_PROFILE_ID, page_size=10, cursor="abc", workspace_id="workspace-uuid-1"
+        )
 
         assert mock_http.post.call_args[1]["json"]["cursor"] == "abc"
 
 
 class TestContentsSections:
     def test_create_section_typed_params(self, mock_http: Mock) -> None:
-        mock_http.post.return_value = None
-        resource = ContentsResource(mock_http)
+        mock_http.post.return_value = {"id": "section-uuid-1"}
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.create_section(CONTENT_ID, "assets", name="Intro")
+        resource.create_section(
+            CONTENT_ID, "assets", name="Intro", workspace_id="workspace-uuid-1"
+        )
 
         mock_http.post.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}/assets/sections",
@@ -116,9 +131,15 @@ class TestContentsSections:
 
     def test_update_section_typed_params(self, mock_http: Mock) -> None:
         mock_http.put.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update_section(CONTENT_ID, "assets", "section-1", name="Updated")
+        resource.update_section(
+            CONTENT_ID,
+            "assets",
+            "section-1",
+            name="Updated",
+            workspace_id="workspace-uuid-1",
+        )
 
         mock_http.put.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}/assets/sections/section-1",
@@ -129,9 +150,11 @@ class TestContentsSections:
 class TestContentsProgression:
     def test_patch_content_progression(self, mock_http: Mock) -> None:
         mock_http.patch.return_value = {"status": "Completed"}
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.patch_content_progression(CONTENT_ID, status="Completed")
+        result = resource.patch_content_progression(
+            CONTENT_ID, status="Completed", workspace_id="workspace-uuid-1"
+        )
 
         mock_http.patch.assert_called_once_with(
             f"/api/v1/progressions/contents/{CONTENT_ID}",
@@ -143,9 +166,11 @@ class TestContentsProgression:
         self, mock_http: Mock
     ) -> None:
         mock_http.patch.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.patch_content_progression(CONTENT_ID, status="Completed")
+        result = resource.patch_content_progression(
+            CONTENT_ID, status="Completed", workspace_id="workspace-uuid-1"
+        )
 
         assert result.status is None
 
@@ -157,9 +182,11 @@ class TestContentsFilterAll:
 
     def test_single_page_yields_all_items(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page(["A", "B"], cursor=None)
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.filter_all(HUB_PROFILE_ID))
+        result = list(
+            resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1")
+        )
 
         assert [r.name for r in result] == ["A", "B"]
         assert mock_http.post.call_count == 1
@@ -170,9 +197,11 @@ class TestContentsFilterAll:
             self._page(["C"], cursor=None),
         ]
         mock_http.post.side_effect = pages
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.filter_all(HUB_PROFILE_ID))
+        result = list(
+            resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1")
+        )
 
         assert [r.name for r in result] == ["A", "B", "C"]
         assert mock_http.post.call_count == 2
@@ -183,9 +212,9 @@ class TestContentsFilterAll:
             self._page(["B"], cursor=None),
         ]
         mock_http.post.side_effect = pages
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.filter_all(HUB_PROFILE_ID))
+        list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
 
         first_body = mock_http.post.call_args_list[0][1]["json"]
         second_body = mock_http.post.call_args_list[1][1]["json"]
@@ -194,23 +223,30 @@ class TestContentsFilterAll:
 
     def test_empty_result(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page([], cursor=None)
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        assert list(resource.filter_all(HUB_PROFILE_ID)) == []
+        assert (
+            list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
+            == []
+        )
 
     def test_default_page_size_is_50(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page([], cursor=None)
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.filter_all(HUB_PROFILE_ID))
+        list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
 
         assert mock_http.post.call_args[1]["json"]["pageSize"] == 50
 
     def test_custom_page_size(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page([], cursor=None)
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.filter_all(HUB_PROFILE_ID, page_size=10))
+        list(
+            resource.filter_all(
+                HUB_PROFILE_ID, page_size=10, workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert mock_http.post.call_args[1]["json"]["pageSize"] == 10
 
@@ -221,18 +257,29 @@ class TestContentsSearchAll:
             {"id": "1", "name": "Intro"},
             {"id": "2", "name": "Intro Advanced"},
         ]
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.search_all(HUB_PROFILE_ID, search="intro"))
+        result = list(
+            resource.search_all(
+                HUB_PROFILE_ID, search="intro", workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert [r.name for r in result] == ["Intro", "Intro Advanced"]
         assert mock_http.post.call_count == 1
 
     def test_empty_search_results(self, mock_http: Mock) -> None:
         mock_http.post.return_value = []
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        assert list(resource.search_all(HUB_PROFILE_ID, search="nothing")) == []
+        assert (
+            list(
+                resource.search_all(
+                    HUB_PROFILE_ID, search="nothing", workspace_id="workspace-uuid-1"
+                )
+            )
+            == []
+        )
 
 
 UPLOAD_SIGNED_URL_NO_COVER = {
@@ -255,9 +302,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
         mock_http.put.assert_called_once()
@@ -267,9 +314,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         body = mock_http.put.call_args[1]["json"]
         assert body["name"] == "My Content"
@@ -279,9 +326,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, name="New Name")
+        resource.update(CONTENT_ID, name="New Name", workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[1]["json"]["name"] == "New Name"
 
@@ -290,9 +337,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         # existing fixture has privacy="Public" — must not be reset to "Preview"
         assert mock_http.put.call_args[1]["json"]["privacy"] == "Public"
@@ -302,9 +349,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, privacy="Private")
+        resource.update(CONTENT_ID, privacy="Private", workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[1]["json"]["privacy"] == "Private"
 
@@ -313,9 +360,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         body = mock_http.put.call_args[1]["json"]
         # Existing channel has two categories; must be serialised as upsert format.
@@ -328,9 +375,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, channels=[])
+        resource.update(CONTENT_ID, channels=[], workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[1]["json"]["channels"] == []
 
@@ -339,9 +386,11 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, channels=["ch-new"])
+        resource.update(
+            CONTENT_ID, channels=["ch-new"], workspace_id="workspace-uuid-1"
+        )
 
         assert mock_http.put.call_args[1]["json"]["channels"] == [
             {"channelId": "ch-new", "categoryIds": []}
@@ -352,9 +401,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         body = mock_http.put.call_args[1]["json"]
         assert len(body["context"]) == 2
@@ -365,10 +414,12 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         new_context = [{"$type": "Text", "content": "Updated"}]
-        resource.update(CONTENT_ID, context=new_context)
+        resource.update(
+            CONTENT_ID, context=new_context, workspace_id="workspace-uuid-1"
+        )
 
         assert mock_http.put.call_args[1]["json"]["context"] == new_context
 
@@ -377,9 +428,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         body = mock_http.put.call_args[1]["json"]
         assert body["categories"] == [{"id": "cat-1"}, {"id": "cat-2"}]
@@ -389,9 +440,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[1]["json"]["details"] == "Existing details"
 
@@ -400,9 +451,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[1]["json"]["mainAssetId"] == "asset-1"
 
@@ -411,9 +462,9 @@ class TestContentsUpdateMerge:
     ) -> None:
         mock_http.get.return_value = content_v2_payload
         mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID)
+        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         assert mock_http.put.call_args[0][0] == f"/api/v1/contents/{CONTENT_ID}"
 
@@ -426,9 +477,9 @@ class TestAsyncContentsUpdateMerge:
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
         async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.update(CONTENT_ID)
+        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         async_mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
         async_mock_http.put.assert_called_once()
@@ -438,9 +489,9 @@ class TestAsyncContentsUpdateMerge:
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
         async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.update(CONTENT_ID)
+        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         assert async_mock_http.put.call_args[1]["json"]["privacy"] == "Public"
 
@@ -449,9 +500,9 @@ class TestAsyncContentsUpdateMerge:
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
         async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.update(CONTENT_ID)
+        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
 
         body = async_mock_http.put.call_args[1]["json"]
         assert body["channels"] == [
@@ -463,10 +514,12 @@ class TestAsyncContentsUpdateMerge:
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
         async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
         new_context = [{"$type": "Text", "content": "New"}]
-        await resource.update(CONTENT_ID, context=new_context)
+        await resource.update(
+            CONTENT_ID, context=new_context, workspace_id="workspace-uuid-1"
+        )
 
         assert async_mock_http.put.call_args[1]["json"]["context"] == new_context
 
@@ -475,9 +528,9 @@ class TestAsyncContentsUpdateMerge:
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
         async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.update(CONTENT_ID, channels=[])
+        await resource.update(CONTENT_ID, channels=[], workspace_id="workspace-uuid-1")
 
         assert async_mock_http.put.call_args[1]["json"]["channels"] == []
 
@@ -485,9 +538,13 @@ class TestAsyncContentsUpdateMerge:
 class TestAsyncContentsCreate:
     async def test_post_with_required_fields(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = UPLOAD_SIGNED_URL_PAYLOAD
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        result = await resource.create(name="My Content", hub_profile_id=HUB_PROFILE_ID)
+        result = await resource.create(
+            name="My Content",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
 
         async_mock_http.post.assert_called_once()
         assert result.id == CONTENT_ID
@@ -495,10 +552,12 @@ class TestAsyncContentsCreate:
     async def test_create_section_typed_params(
         self, async_mock_http: AsyncMock
     ) -> None:
-        async_mock_http.post.return_value = None
-        resource = AsyncContentsResource(async_mock_http)
+        async_mock_http.post.return_value = {"id": "section-uuid-1"}
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.create_section(CONTENT_ID, "assets", name="Intro")
+        await resource.create_section(
+            CONTENT_ID, "assets", name="Intro", workspace_id="workspace-uuid-1"
+        )
 
         async_mock_http.post.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}/assets/sections",
@@ -513,9 +572,14 @@ class TestAsyncContentsFilterAll:
 
     async def test_single_page(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = self._page(["A", "B"], cursor=None)
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        result = [item async for item in resource.filter_all(HUB_PROFILE_ID)]
+        result = [
+            item
+            async for item in resource.filter_all(
+                HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+            )
+        ]
 
         assert [r.name for r in result] == ["A", "B"]
 
@@ -525,9 +589,14 @@ class TestAsyncContentsFilterAll:
             self._page(["C"], cursor=None),
         ]
         async_mock_http.post.side_effect = pages
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        result = [item async for item in resource.filter_all(HUB_PROFILE_ID)]
+        result = [
+            item
+            async for item in resource.filter_all(
+                HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+            )
+        ]
 
         assert [r.name for r in result] == ["A", "B", "C"]
         assert async_mock_http.post.call_count == 2
@@ -537,10 +606,13 @@ class TestAsyncContentsFilterAll:
             {"id": "1", "name": "Intro"},
             {"id": "2", "name": "Intro Advanced"},
         ]
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
         result = [
-            item async for item in resource.search_all(HUB_PROFILE_ID, search="intro")
+            item
+            async for item in resource.search_all(
+                HUB_PROFILE_ID, search="intro", workspace_id="workspace-uuid-1"
+            )
         ]
 
         assert [r.name for r in result] == ["Intro", "Intro Advanced"]
@@ -573,13 +645,14 @@ SUBCONTENT_ITEM_PAYLOAD = {
 class TestContentsSubcontent:
     def test_add_subcontent(self, mock_http: Mock) -> None:
         mock_http.post.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         resource.add_subcontent(
             CONTENT_ID,
             CATEGORY_NAME,
             SECTION_ID,
             subcontent_ids=[REFERENCE_ID, REFERENCE_ID_2],
+            workspace_id="workspace-uuid-1",
         )
 
         mock_http.post.assert_called_once_with(
@@ -592,9 +665,11 @@ class TestContentsSubcontent:
             "items": [SUBCONTENT_ITEM_PAYLOAD],
             "cursor": None,
         }
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        page = resource.get_subcontent(CONTENT_ID, CATEGORY_NAME, page_size=10)
+        page = resource.get_subcontent(
+            CONTENT_ID, CATEGORY_NAME, page_size=10, workspace_id="workspace-uuid-1"
+        )
 
         mock_http.get.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}/references",
@@ -609,10 +684,15 @@ class TestContentsSubcontent:
 
     def test_get_subcontent_with_cursor_and_order(self, mock_http: Mock) -> None:
         mock_http.get.return_value = {"items": [], "cursor": "next"}
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         resource.get_subcontent(
-            CONTENT_ID, CATEGORY_NAME, page_size=5, cursor="prev", order="Desc"
+            CONTENT_ID,
+            CATEGORY_NAME,
+            page_size=5,
+            cursor="prev",
+            order="Desc",
+            workspace_id="workspace-uuid-1",
         )
 
         params = mock_http.get.call_args[1]["params"]
@@ -622,9 +702,11 @@ class TestContentsSubcontent:
 
     def test_delete_subcontent(self, mock_http: Mock) -> None:
         mock_http.delete.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.delete_subcontent(CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID)
+        resource.delete_subcontent(
+            CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID, "workspace-uuid-1"
+        )
 
         mock_http.delete.assert_called_once_with(
             f"/api/v1/contents/{CONTENT_ID}/{CATEGORY_NAME}"
@@ -633,7 +715,7 @@ class TestContentsSubcontent:
 
     def test_move_subcontent(self, mock_http: Mock) -> None:
         mock_http.post.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         resource.move_subcontent(
             CONTENT_ID,
@@ -641,6 +723,7 @@ class TestContentsSubcontent:
             SECTION_ID,
             subcontent_id=REFERENCE_ID,
             previous_subcontent_id=REFERENCE_ID_2,
+            workspace_id="workspace-uuid-1",
         )
 
         mock_http.post.assert_called_once_with(
@@ -654,13 +737,14 @@ class TestContentsSubcontent:
 
     def test_move_subcontent_to_first_position(self, mock_http: Mock) -> None:
         mock_http.post.return_value = None
-        resource = ContentsResource(mock_http)
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
         resource.move_subcontent(
             CONTENT_ID,
             CATEGORY_NAME,
             SECTION_ID,
             subcontent_id=REFERENCE_ID,
+            workspace_id="workspace-uuid-1",
         )
 
         body = mock_http.post.call_args[1]["json"]
@@ -670,13 +754,14 @@ class TestContentsSubcontent:
 class TestAsyncContentsSubcontent:
     async def test_add_subcontent(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = None
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
         await resource.add_subcontent(
             CONTENT_ID,
             CATEGORY_NAME,
             SECTION_ID,
             subcontent_ids=[REFERENCE_ID],
+            workspace_id="workspace-uuid-1",
         )
 
         async_mock_http.post.assert_called_once_with(
@@ -691,9 +776,11 @@ class TestAsyncContentsSubcontent:
             "items": [SUBCONTENT_ITEM_PAYLOAD],
             "cursor": "next-page",
         }
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        page = await resource.get_subcontent(CONTENT_ID, CATEGORY_NAME, page_size=20)
+        page = await resource.get_subcontent(
+            CONTENT_ID, CATEGORY_NAME, page_size=20, workspace_id="workspace-uuid-1"
+        )
 
         assert len(page.items) == 1
         assert page.items[0].id == REFERENCE_ID
@@ -701,10 +788,10 @@ class TestAsyncContentsSubcontent:
 
     async def test_delete_subcontent(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.delete.return_value = None
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
         await resource.delete_subcontent(
-            CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID
+            CONTENT_ID, CATEGORY_NAME, SECTION_ID, REFERENCE_ID, "workspace-uuid-1"
         )
 
         async_mock_http.delete.assert_called_once_with(
@@ -714,7 +801,7 @@ class TestAsyncContentsSubcontent:
 
     async def test_move_subcontent(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = None
-        resource = AsyncContentsResource(async_mock_http)
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
         await resource.move_subcontent(
             CONTENT_ID,
@@ -722,6 +809,7 @@ class TestAsyncContentsSubcontent:
             SECTION_ID,
             subcontent_id=REFERENCE_ID,
             previous_subcontent_id=REFERENCE_ID_2,
+            workspace_id="workspace-uuid-1",
         )
 
         async_mock_http.post.assert_called_once_with(

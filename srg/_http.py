@@ -1,6 +1,5 @@
 # flake8: noqa: ANN401
 
-import contextvars
 from typing import Any
 
 import httpx
@@ -13,53 +12,23 @@ from srg.exceptions import (
     ForbiddenError,
     NotFoundError,
     ServerError,
-    SRGError,
     UnprocessableEntityError,
 )
 
-# Context variable that carries the active workspace API key for the current
-# call stack / async task. ``with_api_key`` and ``use_api_key`` set this; the
-# HTTP client reads it on every request and injects ``Authorization`` per call.
-_active_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "srg_active_api_key", default=None
-)
-
-
-def _get_active_api_key(default: str | None) -> str:
-    """Return the api key bound to this context, or the client's default.
-
-    Raises ``SRGError`` if neither is set.
-    """
-    key = _active_api_key.get()
-    if key is None:
-        key = default
-    if not key:
-        raise SRGError(
-            "No api_key bound. Call client.with_api_key() or use_api_key()."
-        )
-    return key
-
 
 class BaseHTTPClient:
-    def __init__(self, *, api_key: str | None, base_url: str, timeout: float) -> None:
-        # ``api_key`` is the *default* key when nothing is bound via the
-        # context manager / scoped clone. When ``None`` the caller MUST bind a
-        # key per-request, otherwise the request will raise ``SRGError``.
-        self._default_api_key = api_key or None
+    def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
+        self._api_key = api_key
         self._base_url = base_url
         self._timeout = timeout
 
     @staticmethod
-    def _base_headers() -> dict[str, str]:
-        """Static headers baked into the underlying httpx client."""
+    def _default_headers(api_key: str) -> dict[str, str]:
         return {
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-
-    def _auth_headers(self) -> dict[str, str]:
-        """Per-request headers — resolves the active api key from context."""
-        return {"Authorization": f"Bearer {_get_active_api_key(self._default_api_key)}"}
 
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:
@@ -95,48 +64,32 @@ class BaseHTTPClient:
 
 
 class SyncHTTPClient(BaseHTTPClient):
-    def __init__(
-        self, *, api_key: str | None, base_url: str, timeout: float
-    ) -> None:
+    def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
         super().__init__(api_key=api_key, base_url=base_url, timeout=timeout)
         self._client = httpx.Client(
             base_url=self._base_url,
-            headers=self._base_headers(),
+            headers=self._default_headers(api_key),
             timeout=self._timeout,
         )
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return self._process(
-            self._client.get(path, params=params, headers=self._auth_headers())
-        )
+        return self._process(self._client.get(path, params=params))
 
     def post(
         self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
     ) -> Any:
-        return self._process(
-            self._client.post(
-                path, json=json, params=params, headers=self._auth_headers()
-            )
-        )
+        return self._process(self._client.post(path, json=json, params=params))
 
     def put(
         self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
     ) -> Any:
-        return self._process(
-            self._client.put(
-                path, json=json, params=params, headers=self._auth_headers()
-            )
-        )
+        return self._process(self._client.put(path, json=json, params=params))
 
     def patch(self, path: str, *, json: Any = None) -> Any:
-        return self._process(
-            self._client.patch(path, json=json, headers=self._auth_headers())
-        )
+        return self._process(self._client.patch(path, json=json))
 
     def delete(self, path: str) -> Any:
-        return self._process(
-            self._client.delete(path, headers=self._auth_headers())
-        )
+        return self._process(self._client.delete(path))
 
     def close(self) -> None:
         self._client.close()
@@ -149,52 +102,32 @@ class SyncHTTPClient(BaseHTTPClient):
 
 
 class AsyncHTTPClient(BaseHTTPClient):
-    def __init__(
-        self, *, api_key: str | None, base_url: str, timeout: float
-    ) -> None:
+    def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
         super().__init__(api_key=api_key, base_url=base_url, timeout=timeout)
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers=self._base_headers(),
+            headers=self._default_headers(api_key),
             timeout=self._timeout,
         )
 
     async def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return self._process(
-            await self._client.get(
-                path, params=params, headers=self._auth_headers()
-            )
-        )
+        return self._process(await self._client.get(path, params=params))
 
     async def post(
         self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
     ) -> Any:
-        return self._process(
-            await self._client.post(
-                path, json=json, params=params, headers=self._auth_headers()
-            )
-        )
+        return self._process(await self._client.post(path, json=json, params=params))
 
     async def put(
         self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
     ) -> Any:
-        return self._process(
-            await self._client.put(
-                path, json=json, params=params, headers=self._auth_headers()
-            )
-        )
+        return self._process(await self._client.put(path, json=json, params=params))
 
     async def patch(self, path: str, *, json: Any = None) -> Any:
-        return self._process(
-            await self._client.patch(
-                path, json=json, headers=self._auth_headers()
-            )
-        )
+        return self._process(await self._client.patch(path, json=json))
 
     async def delete(self, path: str) -> Any:
-        return self._process(
-            await self._client.delete(path, headers=self._auth_headers())
-        )
+        return self._process(await self._client.delete(path))
 
     async def aclose(self) -> None:
         await self._client.aclose()

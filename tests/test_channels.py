@@ -10,10 +10,13 @@ HUB_PROFILE_ID = "hub-profile-uuid-1"
 class TestChannelsCreate:
     def test_create_returns_id(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"id": CHANNEL_ID}
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
         result = resource.create(
-            name="My Channel", hub_profile_id=HUB_PROFILE_ID, privacy="Public"
+            name="My Channel",
+            hub_profile_id=HUB_PROFILE_ID,
+            privacy="Public",
+            workspace_id="workspace-uuid-1",
         )
 
         mock_http.post.assert_called_once_with(
@@ -28,9 +31,11 @@ class TestChannelsCreate:
 
     def test_create_default_privacy_is_private(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"id": CHANNEL_ID}
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        resource.create(name="X", hub_profile_id=HUB_PROFILE_ID)
+        resource.create(
+            name="X", hub_profile_id=HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+        )
 
         body = mock_http.post.call_args[1]["json"]
         assert body["privacy"] == "Private"
@@ -39,13 +44,14 @@ class TestChannelsCreate:
 class TestChannelsUpdate:
     def test_update_sends_correct_body(self, mock_http: Mock) -> None:
         mock_http.put.return_value = None
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
         resource.update(
             channel_id=CHANNEL_ID,
             hub_profile_id=HUB_PROFILE_ID,
             name="Renamed",
             privacy="Public",
+            workspace_id="workspace-uuid-1",
         )
 
         body = mock_http.put.call_args[1]["json"]
@@ -55,13 +61,14 @@ class TestChannelsUpdate:
 
     def test_update_with_categories(self, mock_http: Mock) -> None:
         mock_http.put.return_value = None
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
         resource.update(
             channel_id=CHANNEL_ID,
             hub_profile_id=HUB_PROFILE_ID,
             name="X",
             categories=[CategoryToReorder(id="cat-1", order=0)],
+            workspace_id="workspace-uuid-1",
         )
 
         body = mock_http.put.call_args[1]["json"]
@@ -73,9 +80,9 @@ class TestChannelsList:
         self, mock_http: Mock, channel_payload: dict
     ) -> None:
         mock_http.get.return_value = [channel_payload]
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.list(HUB_PROFILE_ID)
+        result = resource.list(HUB_PROFILE_ID, workspace_id="workspace-uuid-1")
 
         call_args = mock_http.get.call_args
         assert call_args[0][0] == f"/api/v1/channels/{HUB_PROFILE_ID}"
@@ -87,9 +94,9 @@ class TestChannelsList:
         self, mock_http: Mock, channel_payload: dict
     ) -> None:
         mock_http.get.return_value = channel_payload
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.get(CHANNEL_ID)
+        result = resource.get(CHANNEL_ID, workspace_id="workspace-uuid-1")
 
         mock_http.get.assert_called_once_with(f"/api/v2/channels/{CHANNEL_ID}")
         assert result.id == CHANNEL_ID
@@ -101,9 +108,11 @@ class TestChannelsList:
 class TestChannelsGetCategory:
     def test_get_category_references_paged(self, mock_http: Mock) -> None:
         mock_http.get.return_value = {"items": [], "cursor": None}
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.get_category_references(CHANNEL_ID, "cat-1", page_size=10)
+        result = resource.get_category_references(
+            CHANNEL_ID, "cat-1", page_size=10, workspace_id="workspace-uuid-1"
+        )
 
         params = mock_http.get.call_args[1]["params"]
         assert params["pageSize"] == 10
@@ -119,9 +128,13 @@ class TestChannelsGetCategoryReferencesAll:
 
     def test_single_page_yields_all(self, mock_http: Mock) -> None:
         mock_http.get.return_value = self._page(3, cursor=None)
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.get_category_references_all(CHANNEL_ID, "cat-1"))
+        result = list(
+            resource.get_category_references_all(
+                CHANNEL_ID, "cat-1", workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert len(result) == 3
         assert mock_http.get.call_count == 1
@@ -132,9 +145,13 @@ class TestChannelsGetCategoryReferencesAll:
             self._page(1, cursor=None),
         ]
         mock_http.get.side_effect = pages
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.get_category_references_all(CHANNEL_ID, "cat-1"))
+        result = list(
+            resource.get_category_references_all(
+                CHANNEL_ID, "cat-1", workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert len(result) == 3
         assert mock_http.get.call_count == 2
@@ -145,18 +162,26 @@ class TestChannelsGetCategoryReferencesAll:
             self._page(1, cursor=None),
         ]
         mock_http.get.side_effect = pages
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.get_category_references_all(CHANNEL_ID, "cat-1"))
+        list(
+            resource.get_category_references_all(
+                CHANNEL_ID, "cat-1", workspace_id="workspace-uuid-1"
+            )
+        )
 
         second_params = mock_http.get.call_args_list[1][1]["params"]
         assert second_params["cursor"] == "next"
 
     def test_default_page_size_is_50(self, mock_http: Mock) -> None:
         mock_http.get.return_value = self._page(0, cursor=None)
-        resource = ChannelsResource(mock_http)
+        resource = ChannelsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.get_category_references_all(CHANNEL_ID, "cat-1"))
+        list(
+            resource.get_category_references_all(
+                CHANNEL_ID, "cat-1", workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert mock_http.get.call_args[1]["params"]["pageSize"] == 50
 
@@ -164,9 +189,13 @@ class TestChannelsGetCategoryReferencesAll:
 class TestAsyncChannels:
     async def test_create_returns_id(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = {"id": CHANNEL_ID}
-        resource = AsyncChannelsResource(async_mock_http)
+        resource = AsyncChannelsResource({"workspace-uuid-1": async_mock_http})
 
-        result = await resource.create(name="My Channel", hub_profile_id=HUB_PROFILE_ID)
+        result = await resource.create(
+            name="My Channel",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
 
         assert result == CHANNEL_ID
 
@@ -182,11 +211,13 @@ class TestAsyncChannels:
 
         pages = [_page(2, cursor="cur2"), _page(1, cursor=None)]
         async_mock_http.get.side_effect = pages
-        resource = AsyncChannelsResource(async_mock_http)
+        resource = AsyncChannelsResource({"workspace-uuid-1": async_mock_http})
 
         result = [
             item
-            async for item in resource.get_category_references_all(CHANNEL_ID, "cat-1")
+            async for item in resource.get_category_references_all(
+                CHANNEL_ID, "cat-1", workspace_id="workspace-uuid-1"
+            )
         ]
 
         assert len(result) == 3

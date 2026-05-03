@@ -1,13 +1,28 @@
 from srg._http import AsyncHTTPClient, SyncHTTPClient
+from srg.exceptions import SRGError
 from srg.schemas.permission import GetTarget, WorkspaceUser
 
 
 class PermissionsResource:
-    def __init__(self, http: SyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     def give(
-        self, *, user_id: str, target_id: str, target_type: str, role_id: int
+        self,
+        *,
+        user_id: str,
+        target_id: str,
+        target_type: str,
+        role_id: int,
+        workspace_id: str,
     ) -> dict | None:
         """
         Assign a role to a user on a target.
@@ -30,16 +45,17 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.permissions.give(
             user_id="01965f7a-0000-7000-8000-000000000007",
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
             role_id=2,
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        return self._http.post(
+        return self._get_http(workspace_id).post(
             "/api/v1/permissions",
             json={
                 "userId": user_id,
@@ -49,7 +65,9 @@ class PermissionsResource:
             },
         )
 
-    def delete(self, *, target_type: str, target_id: str, user_id: str) -> None:
+    def delete(
+        self, *, target_type: str, target_id: str, user_id: str, workspace_id: str
+    ) -> None:
         """
         Remove a user's role from a target.
 
@@ -64,17 +82,20 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.permissions.delete(
             target_type="HubProfile",
             target_id="01965f7a-0000-7000-8000-000000000002",
             user_id="01965f7a-0000-7000-8000-000000000007",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.delete(f"/api/v1/permissions/{target_type}/{target_id}/{user_id}")
+        self._get_http(workspace_id).delete(
+            f"/api/v1/permissions/{target_type}/{target_id}/{user_id}"
+        )
 
-    def can_read(self, *, target_id: str, target_type: str) -> bool:
+    def can_read(self, *, target_id: str, target_type: str, workspace_id: str) -> bool:
         """
         Check whether the current API key user can read a target.
 
@@ -87,10 +108,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         readable = client.permissions.can_read(
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -99,10 +121,12 @@ class PermissionsResource:
         True
         ```
         """
-        data = self._http.get(f"/api/v1/permissions/can-read/{target_type}/{target_id}")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/permissions/can-read/{target_type}/{target_id}"
+        )
         return bool(data)
 
-    def can_edit(self, *, target_id: str, target_type: str) -> bool:
+    def can_edit(self, *, target_id: str, target_type: str, workspace_id: str) -> bool:
         """
         Check whether the current API key user can edit a target.
 
@@ -115,10 +139,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         editable = client.permissions.can_edit(
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -127,11 +152,18 @@ class PermissionsResource:
         True
         ```
         """
-        data = self._http.get(f"/api/v1/permissions/can-edit/{target_type}/{target_id}")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/permissions/can-edit/{target_type}/{target_id}"
+        )
         return bool(data)
 
     def can_create_child(
-        self, *, parent_target_type: str, parent_target_id: str, child_target_type: str
+        self,
+        *,
+        parent_target_type: str,
+        parent_target_id: str,
+        child_target_type: str,
+        workspace_id: str,
     ) -> bool:
         """
         Check whether the current user can create a child resource inside a parent.
@@ -150,11 +182,12 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         allowed = client.permissions.can_create_child(
             parent_target_type="HubProfile",
             parent_target_id="01965f7a-0000-7000-8000-000000000002",
             child_target_type="Channel",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -163,12 +196,14 @@ class PermissionsResource:
         True
         ```
         """
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-create-child/{parent_target_type}/{parent_target_id}/{child_target_type}"
         )
         return bool(data)
 
-    def can_manage_permissions(self, *, target_id: str, target_type: str) -> bool:
+    def can_manage_permissions(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current user can manage permissions on a target.
 
@@ -184,10 +219,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         can_manage = client.permissions.can_manage_permissions(
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -196,12 +232,14 @@ class PermissionsResource:
         False
         ```
         """
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-manage-permissions/{target_type}/{target_id}"
         )
         return bool(data)
 
-    def can_archive(self, *, target_id: str, target_type: str) -> bool:
+    def can_archive(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current user can archive a target.
 
@@ -214,10 +252,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         can_archive = client.permissions.can_archive(
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -226,12 +265,12 @@ class PermissionsResource:
         True
         ```
         """
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-manage-archivation/{target_type}/{target_id}"
         )
         return bool(data)
 
-    def is_member(self, *, target_id: str, target_type: str) -> bool:
+    def is_member(self, *, target_id: str, target_type: str, workspace_id: str) -> bool:
         """
         Check whether the current user is a member of a target.
 
@@ -248,10 +287,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         member = client.permissions.is_member(
             target_id="01965f7a-0000-7000-8000-000000000002",
             target_type="HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -260,7 +300,7 @@ class PermissionsResource:
         True
         ```
         """
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permissions/is-member/{target_type}/{target_id}"
         )
         return bool(data)
@@ -271,6 +311,7 @@ class PermissionsResource:
         *,
         child_target_type: str | None = None,
         parent_target_id: str | None = None,
+        workspace_id: str,
     ) -> list[GetTarget]:
         """
         Get all targets of a given type accessible to the current user.
@@ -292,8 +333,11 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        targets = client.permissions.get_targets("HubProfile")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        targets = client.permissions.get_targets(
+            "HubProfile",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -319,7 +363,7 @@ class PermissionsResource:
             params["childTargetType"] = child_target_type
         if parent_target_id:
             params["parentTargetId"] = parent_target_id
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permissions/{parent_target_type}", params=params or None
         )
         return [GetTarget.model_validate(item) for item in (data or [])]
@@ -340,7 +384,7 @@ class PermissionsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         users = client.permissions.get_workspace_users(
             "01965f7a-0000-7000-8000-000000000001"
         )
@@ -363,16 +407,32 @@ class PermissionsResource:
         ]
         ```
         """
-        data = self._http.get(f"/api/v1/permissions/workspaces/{workspace_id}/users")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/permissions/workspaces/{workspace_id}/users"
+        )
         return [WorkspaceUser.model_validate(item) for item in (data or [])]
 
 
 class AsyncPermissionsResource:
-    def __init__(self, http: AsyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     async def give(
-        self, *, user_id: str, target_id: str, target_type: str, role_id: int
+        self,
+        *,
+        user_id: str,
+        target_id: str,
+        target_type: str,
+        role_id: int,
+        workspace_id: str,
     ) -> dict | None:
         """
         Assign a role to a user on a target.
@@ -395,16 +455,17 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permissions.give(
                 user_id="01965f7a-0000-7000-8000-000000000007",
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
                 role_id=2,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.post(
+        return await self._get_http(workspace_id).post(
             "/api/v1/permissions",
             json={
                 "userId": user_id,
@@ -414,7 +475,9 @@ class AsyncPermissionsResource:
             },
         )
 
-    async def delete(self, *, target_type: str, target_id: str, user_id: str) -> None:
+    async def delete(
+        self, *, target_type: str, target_id: str, user_id: str, workspace_id: str
+    ) -> None:
         """
         Remove a user's role from a target.
 
@@ -429,19 +492,22 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permissions.delete(
                 target_type="HubProfile",
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 user_id="01965f7a-0000-7000-8000-000000000007",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.delete(
+        await self._get_http(workspace_id).delete(
             f"/api/v1/permissions/{target_type}/{target_id}/{user_id}"
         )
 
-    async def can_read(self, *, target_id: str, target_type: str) -> bool:
+    async def can_read(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current API key user can read a target.
 
@@ -454,10 +520,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             readable = await client.permissions.can_read(
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -466,12 +533,14 @@ class AsyncPermissionsResource:
         True
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-read/{target_type}/{target_id}"
         )
         return bool(data)
 
-    async def can_edit(self, *, target_id: str, target_type: str) -> bool:
+    async def can_edit(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current API key user can edit a target.
 
@@ -484,10 +553,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             editable = await client.permissions.can_edit(
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -496,13 +566,18 @@ class AsyncPermissionsResource:
         True
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-edit/{target_type}/{target_id}"
         )
         return bool(data)
 
     async def can_create_child(
-        self, *, parent_target_type: str, parent_target_id: str, child_target_type: str
+        self,
+        *,
+        parent_target_type: str,
+        parent_target_id: str,
+        child_target_type: str,
+        workspace_id: str,
     ) -> bool:
         """
         Check whether the current user can create a child resource inside a parent.
@@ -521,11 +596,12 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             allowed = await client.permissions.can_create_child(
                 parent_target_type="HubProfile",
                 parent_target_id="01965f7a-0000-7000-8000-000000000002",
                 child_target_type="Channel",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -534,12 +610,14 @@ class AsyncPermissionsResource:
         True
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-create-child/{parent_target_type}/{parent_target_id}/{child_target_type}"
         )
         return bool(data)
 
-    async def can_manage_permissions(self, *, target_id: str, target_type: str) -> bool:
+    async def can_manage_permissions(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current user can manage permissions on a target.
 
@@ -555,10 +633,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             can_manage = await client.permissions.can_manage_permissions(
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -567,12 +646,14 @@ class AsyncPermissionsResource:
         False
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-manage-permissions/{target_type}/{target_id}"
         )
         return bool(data)
 
-    async def can_archive(self, *, target_id: str, target_type: str) -> bool:
+    async def can_archive(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current user can archive a target.
 
@@ -585,10 +666,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             can_archive = await client.permissions.can_archive(
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -597,12 +679,14 @@ class AsyncPermissionsResource:
         True
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/can-manage-archivation/{target_type}/{target_id}"
         )
         return bool(data)
 
-    async def is_member(self, *, target_id: str, target_type: str) -> bool:
+    async def is_member(
+        self, *, target_id: str, target_type: str, workspace_id: str
+    ) -> bool:
         """
         Check whether the current user is a member of a target.
 
@@ -619,10 +703,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             member = await client.permissions.is_member(
                 target_id="01965f7a-0000-7000-8000-000000000002",
                 target_type="HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -631,7 +716,7 @@ class AsyncPermissionsResource:
         True
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/is-member/{target_type}/{target_id}"
         )
         return bool(data)
@@ -642,6 +727,7 @@ class AsyncPermissionsResource:
         *,
         child_target_type: str | None = None,
         parent_target_id: str | None = None,
+        workspace_id: str,
     ) -> list[GetTarget]:
         """
         Get all targets of a given type accessible to the current user.
@@ -663,8 +749,11 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            targets = await client.permissions.get_targets("HubProfile")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            targets = await client.permissions.get_targets(
+                "HubProfile",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
 
         Example response:
@@ -684,7 +773,7 @@ class AsyncPermissionsResource:
             params["childTargetType"] = child_target_type
         if parent_target_id:
             params["parentTargetId"] = parent_target_id
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/{parent_target_type}", params=params or None
         )
         return [GetTarget.model_validate(item) for item in (data or [])]
@@ -705,7 +794,7 @@ class AsyncPermissionsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             users = await client.permissions.get_workspace_users(
                 "01965f7a-0000-7000-8000-000000000001"
             )
@@ -728,7 +817,7 @@ class AsyncPermissionsResource:
         ]
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permissions/workspaces/{workspace_id}/users"
         )
         return [WorkspaceUser.model_validate(item) for item in (data or [])]

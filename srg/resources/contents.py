@@ -12,6 +12,7 @@ from srg._upload import (
     read_image_async,
     read_image_sync,
 )
+from srg.exceptions import SRGError
 from srg.schemas.common import (
     ContentFileUploadParameters,
     ContentPrivacy,
@@ -99,8 +100,16 @@ async def _upload_cover_async(
 
 
 class ContentsResource:
-    def __init__(self, http: SyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     def create(
         self,
@@ -116,6 +125,7 @@ class ContentsResource:
         channels: list[str | ContentChannelUpsert] | None = None,
         context: list[Any] | None = None,
         categories: list[Any] | None = None,
+        workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
         Create a new content item in a hub profile.
@@ -157,7 +167,7 @@ class ContentsResource:
         ```python
         from sdk.schemas.content import ContentChannelUpsert
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         content = client.contents.create(
             name="Welcome to the Team",
             hub_profile_id="01965f7a-0000-7000-8000-000000000002",
@@ -165,6 +175,7 @@ class ContentsResource:
             details="Everything you need to know for your first week.",
             main_asset_id="01965f7a-0000-7000-8000-000000000006",
             cover_image="/path/to/cover.jpg",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         # content is Content with cover already populated
         ```
@@ -217,7 +228,7 @@ class ContentsResource:
                 if isinstance(cover, BaseModel)
                 else cover
             )
-        data = self._http.post("/api/v1/contents", json=body)
+        data = self._get_http(workspace_id).post("/api/v1/contents", json=body)
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
@@ -226,10 +237,14 @@ class ContentsResource:
             )
 
         if cover_image is not None:
-            return self.get(result.id, hub_profile_id=hub_profile_id)
+            return self.get(
+                result.id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
+            )
         return result
 
-    def get(self, content_id: str, *, hub_profile_id: str | None = None) -> Content:
+    def get(
+        self, content_id: str, *, hub_profile_id: str | None = None, workspace_id: str
+    ) -> Content:
         """
         Get a content item by ID (v1).
 
@@ -249,8 +264,11 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        content = client.contents.get("01965f7a-0000-7000-8000-000000000005")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        content = client.contents.get(
+            "01965f7a-0000-7000-8000-000000000005",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -294,7 +312,9 @@ class ContentsResource:
         ```
         """
         params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = self._http.get(f"/api/v1/contents/{content_id}", params=params)
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/contents/{content_id}", params=params
+        )
         return Content.model_validate(data)
 
     def update(
@@ -312,6 +332,7 @@ class ContentsResource:
         channels: list[str | ContentChannelUpsert] | None = None,
         context: list[Any] | None = None,
         categories: list[Any] | None = None,
+        workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
         Update a content item's metadata.
@@ -352,16 +373,17 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         # Only name and privacy change; channels/context/categories are preserved.
         content = client.contents.update(
             "01965f7a-0000-7000-8000-000000000005",
             name="Welcome to the Team (v2)",
             privacy="Public",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        existing = self.get_v2(content_id)
+        existing = self.get_v2(content_id, workspace_id=workspace_id)
 
         _name = name if name is not None else existing.name
         _privacy = privacy if privacy is not None else existing.privacy
@@ -410,7 +432,7 @@ class ContentsResource:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
 
         params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = self._http.put(
+        data = self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}", json=body, params=params
         )
         result = ContentUploadSignedUrl.model_validate(data)
@@ -421,7 +443,9 @@ class ContentsResource:
             )
 
         if cover_image is not None:
-            return self.get(content_id, hub_profile_id=hub_profile_id)
+            return self.get(
+                content_id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
+            )
         return result
 
     def filter(
@@ -435,6 +459,7 @@ class ContentsResource:
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> CursorPagedList[ContentSearch]:
         """
         List content items for a hub profile with cursor-based pagination.
@@ -465,11 +490,12 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         page = client.contents.filter(
             "01965f7a-0000-7000-8000-000000000002",
             page_size=20,
             types=["Content"],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
 
         # Or iterate all pages:
@@ -480,6 +506,7 @@ class ContentsResource:
                 "01965f7a-0000-7000-8000-000000000002",
                 page_size=50,
                 cursor=cursor,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ):
             print(item.name)
@@ -511,7 +538,9 @@ class ContentsResource:
         }
         if cursor is not None:
             body["cursor"] = cursor
-        data = self._http.post(f"/api/v1/contents/{hub_profile_id}/filter/", json=body)
+        data = self._get_http(workspace_id).post(
+            f"/api/v1/contents/{hub_profile_id}/filter/", json=body
+        )
         items = [ContentSearch.model_validate(i) for i in (data.get("items") or [])]
         return CursorPagedList[ContentSearch](items=items, cursor=data.get("cursor"))
 
@@ -525,6 +554,7 @@ class ContentsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
+        workspace_id: str,
     ) -> list[ContentSearch]:
         """
         Search content items in a hub profile by name or keyword.
@@ -548,10 +578,11 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         results = client.contents.search(
             "01965f7a-0000-7000-8000-000000000002",
             search="welcome",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -577,7 +608,9 @@ class ContentsResource:
             body["excludeCollections"] = exclude_collections
         if exclude_contents is not None:
             body["excludeContents"] = exclude_contents
-        data = self._http.post(f"/api/v1/contents/{hub_profile_id}/search", json=body)
+        data = self._get_http(workspace_id).post(
+            f"/api/v1/contents/{hub_profile_id}/search", json=body
+        )
         return [ContentSearch.model_validate(item) for item in (data or [])]
 
     # -- Content category management --
@@ -587,6 +620,7 @@ class ContentsResource:
         content_id: str,
         *,
         channels_categories: list[ContentChannelUpsert],
+        workspace_id: str,
     ) -> None:
         """
         Add a content item to one or more channel categories.
@@ -600,7 +634,7 @@ class ContentsResource:
         ```python
         from srg.schemas.content import ContentChannelUpsert
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.add_to_categories(
             "01965f7a-0000-7000-8000-000000000005",
             channels_categories=[
@@ -609,6 +643,7 @@ class ContentsResource:
                     category_ids=["01965f7a-0000-7000-8000-000000000004"],
                 )
             ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
@@ -616,13 +651,14 @@ class ContentsResource:
             "contentId": content_id,
             "channelsCategories": _ser_list(channels_categories),
         }
-        self._http.put("/api/v1/contents/channels/add", json=body)
+        self._get_http(workspace_id).put("/api/v1/contents/channels/add", json=body)
 
     def remove_from_categories(
         self,
         content_id: str,
         *,
         channels_categories: list[ContentChannelUpsert],
+        workspace_id: str,
     ) -> None:
         """
         Remove a content item from one or more channel categories.
@@ -638,7 +674,7 @@ class ContentsResource:
         ```python
         from srg.schemas.content import ContentChannelUpsert
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.remove_from_categories(
             "01965f7a-0000-7000-8000-000000000005",
             channels_categories=[
@@ -647,6 +683,7 @@ class ContentsResource:
                     category_ids=["01965f7a-0000-7000-8000-000000000004"],
                 )
             ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
@@ -654,7 +691,9 @@ class ContentsResource:
             "contentId": content_id,
             "channelsCategories": _ser_list(channels_categories),
         }
-        self._http.put("/api/v1/contents/channels/categories/delete", json=body)
+        self._get_http(workspace_id).put(
+            "/api/v1/contents/channels/categories/delete", json=body
+        )
 
     def move(
         self,
@@ -663,6 +702,7 @@ class ContentsResource:
         channel_id: str,
         category_id: str,
         section_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Move a content item to a different channel category.
@@ -675,12 +715,13 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.move(
             "01965f7a-0000-7000-8000-000000000005",
             channel_id="01965f7a-0000-7000-8000-000000000003",
             category_id="01965f7a-0000-7000-8000-000000000013",
             section_id="01965f7a-0000-7000-8000-000000000011",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
@@ -689,14 +730,19 @@ class ContentsResource:
             "categoryId": category_id,
             "sectionId": section_id,
         }
-        self._http.put(
+        self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
     # -- Content sections --
 
     def create_section(
-        self, content_id: str, category_name: str, *, name: str
+        self,
+        content_id: str,
+        category_name: str,
+        *,
+        name: str,
+        workspace_id: str,
     ) -> CreatedSection:
         """
         Create a section in a content item's category.
@@ -714,23 +760,30 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         result = client.contents.create_section(
             "01965f7a-0000-7000-8000-000000000005",
             "week-1",
             name="Day 1",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         print(result.id)
         ```
         """
-        data = self._http.post(
+        data = self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
         return CreatedSection.model_validate(data)
 
     def update_section(
-        self, content_id: str, category_name: str, section_id: str, *, name: str
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        name: str,
+        workspace_id: str,
     ) -> dict | None:
         """
         Update the name of a section in a content item's category.
@@ -746,22 +799,27 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.update_section(
             "01965f7a-0000-7000-8000-000000000005",
             "week-1",
             "01965f7a-0000-7000-8000-000000000011",
             name="Day 1 (Updated)",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        return self._http.put(
+        return self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}",
             json={"name": name},
         )
 
     def delete_section(
-        self, content_id: str, category_name: str, section_id: str
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Delete a section from a content item's category.
@@ -776,15 +834,16 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.delete_section(
             "01965f7a-0000-7000-8000-000000000005",
             "week-1",
             "01965f7a-0000-7000-8000-000000000011",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.delete(
+        self._get_http(workspace_id).delete(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}"
         )
 
@@ -797,6 +856,7 @@ class ContentsResource:
         section_id: str,
         *,
         subcontent_ids: list[str],
+        workspace_id: str,
     ) -> None:
         """
         Add content items as subcontent inside a collection section.
@@ -812,7 +872,7 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.add_subcontent(
             "01965f7a-0000-7000-8000-000000000005",
             "Content",
@@ -821,10 +881,11 @@ class ContentsResource:
                 "01965f7a-0000-7000-8000-000000000020",
                 "01965f7a-0000-7000-8000-000000000021",
             ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.post(
+        self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}/{section_id}/references",
             json={"referenceIds": subcontent_ids},
         )
@@ -837,6 +898,7 @@ class ContentsResource:
         page_size: int,
         cursor: str | None = None,
         order: str = "Asc",
+        workspace_id: str,
     ) -> CursorPagedList[SubcontentItem]:
         """
         Get paginated subcontent (child items) of a collection.
@@ -855,11 +917,12 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         page = client.contents.get_subcontent(
             "01965f7a-0000-7000-8000-000000000005",
             "Content",
             page_size=20,
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         for item in page.items:
             print(item.id, item.name)
@@ -868,7 +931,7 @@ class ContentsResource:
         params: dict = {"pageSize": page_size, "order": order}
         if cursor is not None:
             params["cursor"] = cursor
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/contents/{content_id}/{category_name}/references",
             params=params,
         )
@@ -881,6 +944,7 @@ class ContentsResource:
         category_name: str,
         section_id: str,
         subcontent_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Remove a subcontent item from a collection section.
@@ -895,16 +959,17 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.delete_subcontent(
             "01965f7a-0000-7000-8000-000000000005",
             "Content",
             "01965f7a-0000-7000-8000-000000000011",
             "01965f7a-0000-7000-8000-000000000020",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.delete(
+        self._get_http(workspace_id).delete(
             f"/api/v1/contents/{content_id}/{category_name}"
             f"/{section_id}/references/{subcontent_id}",
         )
@@ -917,6 +982,7 @@ class ContentsResource:
         *,
         subcontent_id: str,
         previous_subcontent_id: str | None = None,
+        workspace_id: str,
     ) -> None:
         """
         Reorder a subcontent item within a collection section.
@@ -935,17 +1001,18 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.move_subcontent(
             "01965f7a-0000-7000-8000-000000000005",
             "Content",
             "01965f7a-0000-7000-8000-000000000011",
             subcontent_id="01965f7a-0000-7000-8000-000000000021",
             previous_subcontent_id="01965f7a-0000-7000-8000-000000000020",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.post(
+        self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}"
             f"/{section_id}/references/move",
             json={
@@ -957,7 +1024,11 @@ class ContentsResource:
     # -- Progressions --
 
     def patch_content_progression(
-        self, content_id: str, *, status: ProgressionStatus
+        self,
+        content_id: str,
+        *,
+        status: ProgressionStatus,
+        workspace_id: str,
     ) -> ContentProgression:
         """
         Update the current user's progression status for a content item.
@@ -976,10 +1047,11 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         progression = client.contents.patch_content_progression(
             "01965f7a-0000-7000-8000-000000000005",
             status="Completed",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -988,7 +1060,7 @@ class ContentsResource:
         ContentProgression(status="Completed")
         ```
         """
-        data = self._http.patch(
+        data = self._get_http(workspace_id).patch(
             f"/api/v1/progressions/contents/{content_id}",
             json={"status": status},
         )
@@ -997,7 +1069,11 @@ class ContentsResource:
         return ContentProgression.model_validate(data)
 
     def patch_media_progression(
-        self, media_id: str, *, last_watched_time: int
+        self,
+        media_id: str,
+        *,
+        last_watched_time: int,
+        workspace_id: str,
     ) -> dict | None:
         """
         Update the current user's last watched position in a media asset.
@@ -1015,20 +1091,24 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.contents.patch_media_progression(
             "01965f7a-0000-7000-8000-000000000006",
             last_watched_time=95,
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        return self._http.patch(
+        return self._get_http(workspace_id).patch(
             f"/api/v1/progressions/medias/{media_id}",
             json={"lastWatchedTime": last_watched_time},
         )
 
     def get_progression_stats(
-        self, *, collection_id: str | None = None
+        self,
+        *,
+        collection_id: str | None = None,
+        workspace_id: str,
     ) -> CollectionProgressionStats:
         """
         Get progression statistics for the current user.
@@ -1046,9 +1126,10 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         stats = client.contents.get_progression_stats(
-            collection_id="01965f7a-0000-7000-8000-000000000014"
+            collection_id="01965f7a-0000-7000-8000-000000000014",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         print(f"{stats.completed}/{stats.total} completed")
         ```
@@ -1059,14 +1140,16 @@ class ContentsResource:
         ```
         """
         params = {"collectionId": collection_id} if collection_id else None
-        data = self._http.get("/api/v1/progressions/stats", params=params)
+        data = self._get_http(workspace_id).get(
+            "/api/v1/progressions/stats", params=params
+        )
         if data is None:
             return CollectionProgressionStats()
         return CollectionProgressionStats.model_validate(data)
 
     # -- V2 --
 
-    def get_v2(self, content_id: str) -> ContentV2:
+    def get_v2(self, content_id: str, *, workspace_id: str) -> ContentV2:
         """
         Get a content item by ID (v2).
 
@@ -1083,8 +1166,11 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        content = client.contents.get_v2("01965f7a-0000-7000-8000-000000000005")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        content = client.contents.get_v2(
+            "01965f7a-0000-7000-8000-000000000005",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -1124,7 +1210,7 @@ class ContentsResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v2/contents/{content_id}")
+        data = self._get_http(workspace_id).get(f"/api/v2/contents/{content_id}")
         return ContentV2.model_validate(data)
 
     def filter_all(
@@ -1137,6 +1223,7 @@ class ContentsResource:
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> Iterator[ContentSearch]:
         """
         Iterate over all content items for a hub profile across all pages.
@@ -1155,8 +1242,11 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        for content in client.contents.filter_all(hub_profile_id):
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        for content in client.contents.filter_all(
+            hub_profile_id,
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        ):
             print(content.name)
         ```
         """
@@ -1171,6 +1261,7 @@ class ContentsResource:
                 exclude_collections=exclude_collections,
                 exclude_contents=exclude_contents,
                 types=types,
+                workspace_id=workspace_id,
             )
             yield from page.items
             cursor = page.cursor
@@ -1187,6 +1278,7 @@ class ContentsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
+        workspace_id: str,
     ) -> Iterator[ContentSearch]:
         """
         Iterate over all content search results as an iterator.
@@ -1205,8 +1297,12 @@ class ContentsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        for content in client.contents.search_all(hub_profile_id, search="intro"):
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        for content in client.contents.search_all(
+            hub_profile_id,
+            search="intro",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        ):
             print(content.name)
         ```
         """
@@ -1218,12 +1314,21 @@ class ContentsResource:
             exclude_categories=exclude_categories,
             exclude_collections=exclude_collections,
             exclude_contents=exclude_contents,
+            workspace_id=workspace_id,
         )
 
 
 class AsyncContentsResource:
-    def __init__(self, http: AsyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     async def create(
         self,
@@ -1239,6 +1344,7 @@ class AsyncContentsResource:
         channels: list[str | ContentChannelUpsert] | None = None,
         context: list[Any] | None = None,
         categories: list[Any] | None = None,
+        workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
         Create a new content item in a hub profile.
@@ -1277,13 +1383,14 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             content = await client.contents.create(
                 name="Welcome to the Team",
                 hub_profile_id="01965f7a-0000-7000-8000-000000000002",
                 privacy="Public",
                 main_asset_id="01965f7a-0000-7000-8000-000000000006",
                 cover_image="/path/to/cover.jpg",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -1331,7 +1438,7 @@ class AsyncContentsResource:
                 if isinstance(cover, BaseModel)
                 else cover
             )
-        data = await self._http.post("/api/v1/contents", json=body)
+        data = await self._get_http(workspace_id).post("/api/v1/contents", json=body)
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
@@ -1340,11 +1447,17 @@ class AsyncContentsResource:
             )
 
         if cover_image is not None:
-            return await self.get(result.id, hub_profile_id=hub_profile_id)
+            return await self.get(
+                result.id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
+            )
         return result
 
     async def get(
-        self, content_id: str, *, hub_profile_id: str | None = None
+        self,
+        content_id: str,
+        *,
+        hub_profile_id: str | None = None,
+        workspace_id: str,
     ) -> Content:
         """
         Get a content item by ID (v1).
@@ -1358,9 +1471,10 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             content = await client.contents.get(
-                "01965f7a-0000-7000-8000-000000000005"
+                "01965f7a-0000-7000-8000-000000000005",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -1383,7 +1497,9 @@ class AsyncContentsResource:
         ```
         """
         params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = await self._http.get(f"/api/v1/contents/{content_id}", params=params)
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/contents/{content_id}", params=params
+        )
         return Content.model_validate(data)
 
     async def update(
@@ -1401,6 +1517,7 @@ class AsyncContentsResource:
         channels: list[str | ContentChannelUpsert] | None = None,
         context: list[Any] | None = None,
         categories: list[Any] | None = None,
+        workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
         Update a content item's metadata.
@@ -1438,16 +1555,17 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             # Only name changes; channels/context/categories are preserved.
             content = await client.contents.update(
                 "01965f7a-0000-7000-8000-000000000005",
                 name="Welcome to the Team (v2)",
                 privacy="Public",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        existing = await self.get_v2(content_id)
+        existing = await self.get_v2(content_id, workspace_id=workspace_id)
 
         _name = name if name is not None else existing.name
         _privacy = privacy if privacy is not None else existing.privacy
@@ -1497,7 +1615,7 @@ class AsyncContentsResource:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
 
         params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = await self._http.put(
+        data = await self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}", json=body, params=params
         )
         result = ContentUploadSignedUrl.model_validate(data)
@@ -1508,7 +1626,9 @@ class AsyncContentsResource:
             )
 
         if cover_image is not None:
-            return await self.get(content_id, hub_profile_id=hub_profile_id)
+            return await self.get(
+                content_id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
+            )
         return result
 
     async def filter(
@@ -1522,6 +1642,7 @@ class AsyncContentsResource:
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> CursorPagedList[ContentSearch]:
         """
         List content items for a hub profile with cursor-based pagination.
@@ -1544,10 +1665,11 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             page = await client.contents.filter(
                 "01965f7a-0000-7000-8000-000000000002",
                 page_size=20,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -1577,7 +1699,7 @@ class AsyncContentsResource:
         }
         if cursor is not None:
             body["cursor"] = cursor
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/contents/{hub_profile_id}/filter/", json=body
         )
         items = [ContentSearch.model_validate(i) for i in (data.get("items") or [])]
@@ -1594,6 +1716,7 @@ class AsyncContentsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
+        workspace_id: str,
     ) -> list[ContentSearch]:
         """
         Search content items in a hub profile by name or keyword.
@@ -1612,10 +1735,11 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             results = await client.contents.search(
                 "01965f7a-0000-7000-8000-000000000002",
                 search="welcome",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -1641,7 +1765,7 @@ class AsyncContentsResource:
             body["excludeCollections"] = exclude_collections
         if exclude_contents is not None:
             body["excludeContents"] = exclude_contents
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/contents/{hub_profile_id}/search", json=body
         )
         return [ContentSearch.model_validate(item) for item in (data or [])]
@@ -1651,6 +1775,7 @@ class AsyncContentsResource:
         content_id: str,
         *,
         channels_categories: list[ContentChannelUpsert],
+        workspace_id: str,
     ) -> None:
         """
         Add a content item to one or more channel categories.
@@ -1664,7 +1789,7 @@ class AsyncContentsResource:
         ```python
         from srg.schemas.content import ContentChannelUpsert
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.add_to_categories(
                 "01965f7a-0000-7000-8000-000000000005",
                 channels_categories=[
@@ -1673,6 +1798,7 @@ class AsyncContentsResource:
                         category_ids=["01965f7a-0000-7000-8000-000000000004"],
                     )
                 ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
@@ -1680,13 +1806,16 @@ class AsyncContentsResource:
             "contentId": content_id,
             "channelsCategories": _ser_list(channels_categories),
         }
-        await self._http.put("/api/v1/contents/channels/add", json=body)
+        await self._get_http(workspace_id).put(
+            "/api/v1/contents/channels/add", json=body
+        )
 
     async def remove_from_categories(
         self,
         content_id: str,
         *,
         channels_categories: list[ContentChannelUpsert],
+        workspace_id: str,
     ) -> None:
         """
         Remove a content item from one or more channel categories.
@@ -1702,7 +1831,7 @@ class AsyncContentsResource:
         ```python
         from srg.schemas.content import ContentChannelUpsert
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.remove_from_categories(
                 "01965f7a-0000-7000-8000-000000000005",
                 channels_categories=[
@@ -1711,6 +1840,7 @@ class AsyncContentsResource:
                         category_ids=["01965f7a-0000-7000-8000-000000000004"],
                     )
                 ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
@@ -1718,7 +1848,9 @@ class AsyncContentsResource:
             "contentId": content_id,
             "channelsCategories": _ser_list(channels_categories),
         }
-        await self._http.put("/api/v1/contents/channels/categories/delete", json=body)
+        await self._get_http(workspace_id).put(
+            "/api/v1/contents/channels/categories/delete", json=body
+        )
 
     async def move(
         self,
@@ -1727,6 +1859,7 @@ class AsyncContentsResource:
         channel_id: str,
         category_id: str,
         section_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Move a content item to a different channel category.
@@ -1739,12 +1872,13 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.move(
                 "01965f7a-0000-7000-8000-000000000005",
                 channel_id="01965f7a-0000-7000-8000-000000000003",
                 category_id="01965f7a-0000-7000-8000-000000000013",
                 section_id="01965f7a-0000-7000-8000-000000000011",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
@@ -1753,12 +1887,17 @@ class AsyncContentsResource:
             "categoryId": category_id,
             "sectionId": section_id,
         }
-        await self._http.put(
+        await self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}/channels/categories/move-to", json=body
         )
 
     async def create_section(
-        self, content_id: str, category_name: str, *, name: str
+        self,
+        content_id: str,
+        category_name: str,
+        *,
+        name: str,
+        workspace_id: str,
     ) -> CreatedSection:
         """
         Create a section in a content item's category.
@@ -1773,23 +1912,30 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             result = await client.contents.create_section(
                 "01965f7a-0000-7000-8000-000000000005",
                 "week-1",
                 name="Day 1",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
             print(result.id)
         ```
         """
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}/sections",
             json={"name": name},
         )
         return CreatedSection.model_validate(data)
 
     async def update_section(
-        self, content_id: str, category_name: str, section_id: str, *, name: str
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        *,
+        name: str,
+        workspace_id: str,
     ) -> dict | None:
         """
         Update the name of a section in a content item's category.
@@ -1805,22 +1951,27 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.update_section(
                 "01965f7a-0000-7000-8000-000000000005",
                 "week-1",
                 "01965f7a-0000-7000-8000-000000000011",
                 name="Day 1 (Updated)",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.put(
+        return await self._get_http(workspace_id).put(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}",
             json={"name": name},
         )
 
     async def delete_section(
-        self, content_id: str, category_name: str, section_id: str
+        self,
+        content_id: str,
+        category_name: str,
+        section_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Delete a section from a content item's category.
@@ -1832,15 +1983,16 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.delete_section(
                 "01965f7a-0000-7000-8000-000000000005",
                 "week-1",
                 "01965f7a-0000-7000-8000-000000000011",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.delete(
+        await self._get_http(workspace_id).delete(
             f"/api/v1/contents/{content_id}/{category_name}/sections/{section_id}"
         )
 
@@ -1853,6 +2005,7 @@ class AsyncContentsResource:
         section_id: str,
         *,
         subcontent_ids: list[str],
+        workspace_id: str,
     ) -> None:
         """
         Add content items as subcontent inside a collection section.
@@ -1868,7 +2021,7 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.add_subcontent(
                 "01965f7a-0000-7000-8000-000000000005",
                 "Content",
@@ -1877,10 +2030,11 @@ class AsyncContentsResource:
                     "01965f7a-0000-7000-8000-000000000020",
                     "01965f7a-0000-7000-8000-000000000021",
                 ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.post(
+        await self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}/{section_id}/references",
             json={"referenceIds": subcontent_ids},
         )
@@ -1893,6 +2047,7 @@ class AsyncContentsResource:
         page_size: int,
         cursor: str | None = None,
         order: str = "Asc",
+        workspace_id: str,
     ) -> CursorPagedList[SubcontentItem]:
         """
         Get paginated subcontent (child items) of a collection.
@@ -1911,11 +2066,12 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             page = await client.contents.get_subcontent(
                 "01965f7a-0000-7000-8000-000000000005",
                 "Content",
                 page_size=20,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
             for item in page.items:
                 print(item.id, item.name)
@@ -1924,7 +2080,7 @@ class AsyncContentsResource:
         params: dict = {"pageSize": page_size, "order": order}
         if cursor is not None:
             params["cursor"] = cursor
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/contents/{content_id}/{category_name}/references",
             params=params,
         )
@@ -1937,6 +2093,7 @@ class AsyncContentsResource:
         category_name: str,
         section_id: str,
         subcontent_id: str,
+        workspace_id: str,
     ) -> None:
         """
         Remove a subcontent item from a collection section.
@@ -1951,16 +2108,17 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.delete_subcontent(
                 "01965f7a-0000-7000-8000-000000000005",
                 "Content",
                 "01965f7a-0000-7000-8000-000000000011",
                 "01965f7a-0000-7000-8000-000000000020",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.delete(
+        await self._get_http(workspace_id).delete(
             f"/api/v1/contents/{content_id}/{category_name}"
             f"/{section_id}/references/{subcontent_id}",
         )
@@ -1973,6 +2131,7 @@ class AsyncContentsResource:
         *,
         subcontent_id: str,
         previous_subcontent_id: str | None = None,
+        workspace_id: str,
     ) -> None:
         """
         Reorder a subcontent item within a collection section.
@@ -1991,17 +2150,18 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.move_subcontent(
                 "01965f7a-0000-7000-8000-000000000005",
                 "Content",
                 "01965f7a-0000-7000-8000-000000000011",
                 subcontent_id="01965f7a-0000-7000-8000-000000000021",
                 previous_subcontent_id="01965f7a-0000-7000-8000-000000000020",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.post(
+        await self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/{category_name}"
             f"/{section_id}/references/move",
             json={
@@ -2011,7 +2171,11 @@ class AsyncContentsResource:
         )
 
     async def patch_content_progression(
-        self, content_id: str, *, status: ProgressionStatus
+        self,
+        content_id: str,
+        *,
+        status: ProgressionStatus,
+        workspace_id: str,
     ) -> ContentProgression:
         """
         Update the current user's progression status for a content item.
@@ -2026,10 +2190,11 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             progression = await client.contents.patch_content_progression(
                 "01965f7a-0000-7000-8000-000000000005",
                 status="Completed",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -2038,7 +2203,7 @@ class AsyncContentsResource:
         ContentProgression(status="Completed")
         ```
         """
-        data = await self._http.patch(
+        data = await self._get_http(workspace_id).patch(
             f"/api/v1/progressions/contents/{content_id}",
             json={"status": status},
         )
@@ -2047,7 +2212,11 @@ class AsyncContentsResource:
         return ContentProgression.model_validate(data)
 
     async def patch_media_progression(
-        self, media_id: str, *, last_watched_time: int
+        self,
+        media_id: str,
+        *,
+        last_watched_time: int,
+        workspace_id: str,
     ) -> dict | None:
         """
         Update the current user's last watched position in a media asset.
@@ -2061,20 +2230,24 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.contents.patch_media_progression(
                 "01965f7a-0000-7000-8000-000000000006",
                 last_watched_time=95,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.patch(
+        return await self._get_http(workspace_id).patch(
             f"/api/v1/progressions/medias/{media_id}",
             json={"lastWatchedTime": last_watched_time},
         )
 
     async def get_progression_stats(
-        self, *, collection_id: str | None = None
+        self,
+        *,
+        collection_id: str | None = None,
+        workspace_id: str,
     ) -> CollectionProgressionStats:
         """
         Get progression statistics for the current user.
@@ -2089,9 +2262,10 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             stats = await client.contents.get_progression_stats(
-                collection_id="01965f7a-0000-7000-8000-000000000014"
+                collection_id="01965f7a-0000-7000-8000-000000000014",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -2101,14 +2275,16 @@ class AsyncContentsResource:
         ```
         """
         params = {"collectionId": collection_id} if collection_id else None
-        data = await self._http.get("/api/v1/progressions/stats", params=params)
+        data = await self._get_http(workspace_id).get(
+            "/api/v1/progressions/stats", params=params
+        )
         if data is None:
             return CollectionProgressionStats()
         return CollectionProgressionStats.model_validate(data)
 
     # -- V2 --
 
-    async def get_v2(self, content_id: str) -> ContentV2:
+    async def get_v2(self, content_id: str, *, workspace_id: str) -> ContentV2:
         """
         Get a content item by ID (v2).
 
@@ -2124,9 +2300,10 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             content = await client.contents.get_v2(
-                "01965f7a-0000-7000-8000-000000000005"
+                "01965f7a-0000-7000-8000-000000000005",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -2163,7 +2340,7 @@ class AsyncContentsResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v2/contents/{content_id}")
+        data = await self._get_http(workspace_id).get(f"/api/v2/contents/{content_id}")
         return ContentV2.model_validate(data)
 
     async def filter_all(
@@ -2176,6 +2353,7 @@ class AsyncContentsResource:
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> AsyncIterator[ContentSearch]:
         """
         Async-iterate over all content items for a hub profile across all pages.
@@ -2185,8 +2363,11 @@ class AsyncContentsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            async for content in client.contents.filter_all(hub_profile_id):
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            async for content in client.contents.filter_all(
+                hub_profile_id,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            ):
                 print(content.name)
         ```
         """
@@ -2201,6 +2382,7 @@ class AsyncContentsResource:
                 exclude_collections=exclude_collections,
                 exclude_contents=exclude_contents,
                 types=types,
+                workspace_id=workspace_id,
             )
             for item in page.items:
                 yield item
@@ -2218,15 +2400,18 @@ class AsyncContentsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_contents: list[str] | None = None,
+        workspace_id: str,
     ) -> AsyncIterator[ContentSearch]:
         """
         Async-iterate over all content search results.
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             async for content in client.contents.search_all(
-                hub_profile_id, search="intro"
+                hub_profile_id,
+                search="intro",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             ):
                 print(content.name)
         ```
@@ -2239,5 +2424,6 @@ class AsyncContentsResource:
             exclude_categories=exclude_categories,
             exclude_collections=exclude_collections,
             exclude_contents=exclude_contents,
+            workspace_id=workspace_id,
         ):
             yield item

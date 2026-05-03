@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "srgplus"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python SDK for SRG+"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -76,6 +76,7 @@ select = [
 ignore = [
     "ANN002",  # Missing type annotation for *args
     "ANN003",  # Missing type annotation for **kwargs
+    "E501"
 ]
 
 [tool.mypy]

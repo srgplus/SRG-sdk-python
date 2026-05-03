@@ -26,9 +26,11 @@ ASSET_UPLOAD_SIGNED_URL_PAYLOAD = {
 class TestAssetsFilter:
     def test_filter_first_page(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"items": [], "cursor": None}
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        result = resource.filter(HUB_PROFILE_ID, page_size=20)
+        result = resource.filter(
+            HUB_PROFILE_ID, page_size=20, workspace_id="workspace-uuid-1"
+        )
 
         body = mock_http.post.call_args[1]["json"]
         assert body["pageSize"] == 20
@@ -38,17 +40,24 @@ class TestAssetsFilter:
 
     def test_filter_with_cursor(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"items": [], "cursor": None}
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        resource.filter(HUB_PROFILE_ID, page_size=10, cursor="abc")
+        resource.filter(
+            HUB_PROFILE_ID, page_size=10, cursor="abc", workspace_id="workspace-uuid-1"
+        )
 
         assert mock_http.post.call_args[1]["json"]["cursor"] == "abc"
 
     def test_filter_with_types(self, mock_http: Mock) -> None:
         mock_http.post.return_value = {"items": [], "cursor": None}
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        resource.filter(HUB_PROFILE_ID, page_size=10, types=["Media"])
+        resource.filter(
+            HUB_PROFILE_ID,
+            page_size=10,
+            types=["Media"],
+            workspace_id="workspace-uuid-1",
+        )
 
         assert mock_http.post.call_args[1]["json"]["type"] == ["Media"]
 
@@ -62,9 +71,11 @@ class TestAssetsFilterAll:
 
     def test_single_page_yields_all(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page(["Video A", "Video B"], cursor=None)
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.filter_all(HUB_PROFILE_ID))
+        result = list(
+            resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1")
+        )
 
         assert [r.name for r in result] == ["Video A", "Video B"]
         assert mock_http.post.call_count == 1
@@ -75,9 +86,11 @@ class TestAssetsFilterAll:
             self._page(["C"], cursor=None),
         ]
         mock_http.post.side_effect = pages
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.filter_all(HUB_PROFILE_ID))
+        result = list(
+            resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1")
+        )
 
         assert [r.name for r in result] == ["A", "B", "C"]
         assert mock_http.post.call_count == 2
@@ -88,9 +101,9 @@ class TestAssetsFilterAll:
             self._page(["B"], cursor=None),
         ]
         mock_http.post.side_effect = pages
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.filter_all(HUB_PROFILE_ID))
+        list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
 
         first_body = mock_http.post.call_args_list[0][1]["json"]
         second_body = mock_http.post.call_args_list[1][1]["json"]
@@ -99,17 +112,20 @@ class TestAssetsFilterAll:
 
     def test_default_page_size_is_50(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page([], cursor=None)
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        list(resource.filter_all(HUB_PROFILE_ID))
+        list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
 
         assert mock_http.post.call_args[1]["json"]["pageSize"] == 50
 
     def test_empty_result(self, mock_http: Mock) -> None:
         mock_http.post.return_value = self._page([], cursor=None)
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        assert list(resource.filter_all(HUB_PROFILE_ID)) == []
+        assert (
+            list(resource.filter_all(HUB_PROFILE_ID, workspace_id="workspace-uuid-1"))
+            == []
+        )
 
 
 class TestAssetsSearchAll:
@@ -118,18 +134,29 @@ class TestAssetsSearchAll:
             {"id": "1", "name": "Intro", "$type": "Media"},
             {"id": "2", "name": "Intro Final", "$type": "Media"},
         ]
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        result = list(resource.search_all(HUB_PROFILE_ID, search="intro"))
+        result = list(
+            resource.search_all(
+                HUB_PROFILE_ID, search="intro", workspace_id="workspace-uuid-1"
+            )
+        )
 
         assert [r.name for r in result] == ["Intro", "Intro Final"]
         assert mock_http.post.call_count == 1
 
     def test_empty_results(self, mock_http: Mock) -> None:
         mock_http.post.return_value = []
-        resource = AssetsResource(mock_http)
+        resource = AssetsResource({"workspace-uuid-1": mock_http})
 
-        assert list(resource.search_all(HUB_PROFILE_ID, search="nothing")) == []
+        assert (
+            list(
+                resource.search_all(
+                    HUB_PROFILE_ID, search="nothing", workspace_id="workspace-uuid-1"
+                )
+            )
+            == []
+        )
 
 
 class TestAsyncAssetsFilterAll:
@@ -141,9 +168,14 @@ class TestAsyncAssetsFilterAll:
 
     async def test_single_page(self, async_mock_http: AsyncMock) -> None:
         async_mock_http.post.return_value = self._page(["A", "B"], cursor=None)
-        resource = AsyncAssetsResource(async_mock_http)
+        resource = AsyncAssetsResource({"workspace-uuid-1": async_mock_http})
 
-        result = [item async for item in resource.filter_all(HUB_PROFILE_ID)]
+        result = [
+            item
+            async for item in resource.filter_all(
+                HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+            )
+        ]
 
         assert [r.name for r in result] == ["A", "B"]
 
@@ -153,9 +185,14 @@ class TestAsyncAssetsFilterAll:
             self._page(["C"], cursor=None),
         ]
         async_mock_http.post.side_effect = pages
-        resource = AsyncAssetsResource(async_mock_http)
+        resource = AsyncAssetsResource({"workspace-uuid-1": async_mock_http})
 
-        result = [item async for item in resource.filter_all(HUB_PROFILE_ID)]
+        result = [
+            item
+            async for item in resource.filter_all(
+                HUB_PROFILE_ID, workspace_id="workspace-uuid-1"
+            )
+        ]
 
         assert [r.name for r in result] == ["A", "B", "C"]
         assert async_mock_http.post.call_count == 2
@@ -164,10 +201,13 @@ class TestAsyncAssetsFilterAll:
         async_mock_http.post.return_value = [
             {"id": "1", "name": "Intro", "$type": "Media"},
         ]
-        resource = AsyncAssetsResource(async_mock_http)
+        resource = AsyncAssetsResource({"workspace-uuid-1": async_mock_http})
 
         result = [
-            item async for item in resource.search_all(HUB_PROFILE_ID, search="intro")
+            item
+            async for item in resource.search_all(
+                HUB_PROFILE_ID, search="intro", workspace_id="workspace-uuid-1"
+            )
         ]
 
         assert result[0].name == "Intro"

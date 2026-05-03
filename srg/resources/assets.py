@@ -6,6 +6,7 @@ from srg._upload import (
     upload_to_signed_url,
     upload_to_signed_url_async,
 )
+from srg.exceptions import SRGError
 from srg.schemas.asset import (
     AnyAssetCreate,
     AnyAssetResponse,
@@ -57,10 +58,20 @@ def _build_search_body(
 
 
 class AssetsResource:
-    def __init__(self, http: SyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
 
-    def create(self, *, hub_profile_id: str, asset: AnyAssetCreate) -> AnyAssetResponse:
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    def create(
+        self, *, hub_profile_id: str, asset: AnyAssetCreate, workspace_id: str
+    ) -> AnyAssetResponse:
         """
         Create a new asset for a hub profile.
 
@@ -87,7 +98,7 @@ class AssetsResource:
         ```python
         from sdk.schemas.asset import MediaAssetCreate
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         asset = client.assets.create(
             hub_profile_id="01965f7a-0000-7000-8000-000000000002",
             asset=MediaAssetCreate(
@@ -95,6 +106,7 @@ class AssetsResource:
                 duration_in_seconds=120.0,
                 memory_size_in_bytes=52_428_800,
             ),
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -111,7 +123,7 @@ class AssetsResource:
         )
         ```
         """
-        data = self._http.post(
+        data = self._get_http(workspace_id).post(
             "/api/v1/assets",
             json={
                 "hubProfileId": hub_profile_id,
@@ -121,7 +133,11 @@ class AssetsResource:
         return parse_asset_response(data)
 
     def create_batch(
-        self, *, hub_profile_id: str, assets: list[AnyAssetCreate]
+        self,
+        *,
+        hub_profile_id: str,
+        assets: list[AnyAssetCreate],
+        workspace_id: str,
     ) -> list[AnyAssetResponse]:
         """
         Create multiple assets for a hub profile in a single request.
@@ -143,7 +159,7 @@ class AssetsResource:
         ```python
         from sdk.schemas.asset import FileAssetCreate, ImageAssetCreate
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         assets = client.assets.create_batch(
             hub_profile_id="01965f7a-0000-7000-8000-000000000002",
             assets=[
@@ -160,6 +176,7 @@ class AssetsResource:
                     memory_size_in_bytes=512_000,
                 ),
             ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -191,7 +208,7 @@ class AssetsResource:
         ]
         ```
         """
-        data = self._http.post(
+        data = self._get_http(workspace_id).post(
             "/api/v1/assets/batch",
             json={
                 "hubProfileId": hub_profile_id,
@@ -202,7 +219,7 @@ class AssetsResource:
         )
         return [parse_asset_response(item) for item in (data or [])]
 
-    def get(self, asset_id: str) -> AnyAssetResponse:
+    def get(self, asset_id: str, *, workspace_id: str) -> AnyAssetResponse:
         """
         Get an asset by ID.
 
@@ -218,8 +235,11 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        asset = client.assets.get("01965f7a-0000-7000-8000-000000000006")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        asset = client.assets.get(
+            "01965f7a-0000-7000-8000-000000000006",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -249,7 +269,7 @@ class AssetsResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/assets/{asset_id}")
+        data = self._get_http(workspace_id).get(f"/api/v1/assets/{asset_id}")
         return parse_asset_response(data)
 
     def update(
@@ -260,6 +280,7 @@ class AssetsResource:
         cover_image: str | Path | None = None,
         cover: ContentFileUploadParameters | None = None,
         read_only: bool = False,
+        workspace_id: str,
     ) -> AnyAssetResponse | AssetUploadSignedUrl:
         """
         Update an asset's name, cover, and read-only flag.
@@ -290,11 +311,12 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         asset = client.assets.update(
             "01965f7a-0000-7000-8000-000000000006",
             name="Intro Video (Final)",
             cover_image="/path/to/thumbnail.jpg",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         # asset is the updated Media/File/etc. with cover populated
         ```
@@ -324,7 +346,7 @@ class AssetsResource:
         body: dict = {"name": name, "readOnly": read_only}
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-        data = self._http.put(f"/api/v1/assets/{asset_id}", json=body)
+        data = self._get_http(workspace_id).put(f"/api/v1/assets/{asset_id}", json=body)
         result = AssetUploadSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
@@ -348,6 +370,7 @@ class AssetsResource:
         exclude_collections: list[str] | None = None,
         exclude_assets: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> CursorPagedList[AssetSearch]:
         """
         List assets for a hub profile with cursor-based pagination.
@@ -378,11 +401,12 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         page = client.assets.filter(
             "01965f7a-0000-7000-8000-000000000002",
             page_size=20,
             types=["Media"],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         for asset in page.items:
             print(asset.name)
@@ -395,6 +419,7 @@ class AssetsResource:
                 "01965f7a-0000-7000-8000-000000000002",
                 page_size=50,
                 cursor=cursor,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ):
             print(asset.name)
@@ -426,7 +451,9 @@ class AssetsResource:
         body = _build_filter_body(
             page_size, only_archived, exclude_collections, exclude_assets, types, cursor
         )
-        data = self._http.post(f"/api/v1/assets/{hub_profile_id}/filter/", json=body)
+        data = self._get_http(workspace_id).post(
+            f"/api/v1/assets/{hub_profile_id}/filter/", json=body
+        )
         result = CursorPagedList[AssetSearch].model_validate(data)
         result.items = [
             AssetSearch.model_validate(item) for item in (data.get("items") or [])
@@ -442,6 +469,7 @@ class AssetsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_medias: list[str] | None = None,
+        workspace_id: str,
     ) -> list[AssetSearch]:
         """
         Search assets in a hub profile by name or keyword.
@@ -464,11 +492,12 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         results = client.assets.search(
             "01965f7a-0000-7000-8000-000000000002",
             search="intro",
             types=["Media"],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -488,7 +517,9 @@ class AssetsResource:
         body = _build_search_body(
             search, types, exclude_categories, exclude_collections, exclude_medias
         )
-        data = self._http.post(f"/api/v1/assets/{hub_profile_id}/search", json=body)
+        data = self._get_http(workspace_id).post(
+            f"/api/v1/assets/{hub_profile_id}/search", json=body
+        )
         return [AssetSearch.model_validate(item) for item in (data or [])]
 
     def filter_all(
@@ -500,6 +531,7 @@ class AssetsResource:
         exclude_collections: list[str] | None = None,
         exclude_assets: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> Iterator[AssetSearch]:
         """
         Iterate over all assets for a hub profile across all pages.
@@ -517,8 +549,11 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        for asset in client.assets.filter_all(hub_profile_id):
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        for asset in client.assets.filter_all(
+            hub_profile_id,
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        ):
             print(asset.name)
         ```
         """
@@ -532,6 +567,7 @@ class AssetsResource:
                 exclude_collections=exclude_collections,
                 exclude_assets=exclude_assets,
                 types=types,
+                workspace_id=workspace_id,
             )
             yield from page.items
             cursor = page.cursor
@@ -547,6 +583,7 @@ class AssetsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_medias: list[str] | None = None,
+        workspace_id: str,
     ) -> Iterator[AssetSearch]:
         """
         Iterate over all asset search results as an iterator.
@@ -564,8 +601,12 @@ class AssetsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        for asset in client.assets.search_all(hub_profile_id, search="intro"):
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        for asset in client.assets.search_all(
+            hub_profile_id,
+            search="intro",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        ):
             print(asset.name)
         ```
         """
@@ -576,15 +617,28 @@ class AssetsResource:
             exclude_categories=exclude_categories,
             exclude_collections=exclude_collections,
             exclude_medias=exclude_medias,
+            workspace_id=workspace_id,
         )
 
 
 class AsyncAssetsResource:
-    def __init__(self, http: AsyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     async def create(
-        self, *, hub_profile_id: str, asset: AnyAssetCreate
+        self,
+        *,
+        hub_profile_id: str,
+        asset: AnyAssetCreate,
+        workspace_id: str,
     ) -> AnyAssetResponse:
         """
         Create a new asset for a hub profile.
@@ -608,7 +662,7 @@ class AsyncAssetsResource:
         ```python
         from sdk.schemas.asset import MediaAssetCreate
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             asset = await client.assets.create(
                 hub_profile_id="01965f7a-0000-7000-8000-000000000002",
                 asset=MediaAssetCreate(
@@ -616,6 +670,7 @@ class AsyncAssetsResource:
                     duration_in_seconds=120.0,
                     memory_size_in_bytes=52_428_800,
                 ),
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -632,7 +687,7 @@ class AsyncAssetsResource:
         )
         ```
         """
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             "/api/v1/assets",
             json={
                 "hubProfileId": hub_profile_id,
@@ -642,7 +697,11 @@ class AsyncAssetsResource:
         return parse_asset_response(data)
 
     async def create_batch(
-        self, *, hub_profile_id: str, assets: list[AnyAssetCreate]
+        self,
+        *,
+        hub_profile_id: str,
+        assets: list[AnyAssetCreate],
+        workspace_id: str,
     ) -> list[AnyAssetResponse]:
         """
         Create multiple assets for a hub profile in a single request.
@@ -662,7 +721,7 @@ class AsyncAssetsResource:
         ```python
         from sdk.schemas.asset import FileAssetCreate
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             assets = await client.assets.create_batch(
                 hub_profile_id="01965f7a-0000-7000-8000-000000000002",
                 assets=[
@@ -672,6 +731,7 @@ class AsyncAssetsResource:
                         memory_size_in_bytes=204_800,
                     ),
                 ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -691,7 +751,7 @@ class AsyncAssetsResource:
         ]
         ```
         """
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             "/api/v1/assets/batch",
             json={
                 "hubProfileId": hub_profile_id,
@@ -702,7 +762,7 @@ class AsyncAssetsResource:
         )
         return [parse_asset_response(item) for item in (data or [])]
 
-    async def get(self, asset_id: str) -> AnyAssetResponse:
+    async def get(self, asset_id: str, *, workspace_id: str) -> AnyAssetResponse:
         """
         Get an asset by ID.
 
@@ -718,8 +778,11 @@ class AsyncAssetsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            asset = await client.assets.get("01965f7a-0000-7000-8000-000000000006")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            asset = await client.assets.get(
+                "01965f7a-0000-7000-8000-000000000006",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
 
         Example response:
@@ -735,7 +798,7 @@ class AsyncAssetsResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v1/assets/{asset_id}")
+        data = await self._get_http(workspace_id).get(f"/api/v1/assets/{asset_id}")
         return parse_asset_response(data)
 
     async def update(
@@ -746,6 +809,7 @@ class AsyncAssetsResource:
         cover_image: str | Path | None = None,
         cover: ContentFileUploadParameters | None = None,
         read_only: bool = False,
+        workspace_id: str,
     ) -> AnyAssetResponse | AssetUploadSignedUrl:
         """
         Update an asset's name, cover, and read-only flag.
@@ -775,11 +839,12 @@ class AsyncAssetsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             asset = await client.assets.update(
                 "01965f7a-0000-7000-8000-000000000006",
                 name="Intro Video (Final)",
                 cover_image="/path/to/thumbnail.jpg",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -805,7 +870,9 @@ class AsyncAssetsResource:
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
 
-        data = await self._http.put(f"/api/v1/assets/{asset_id}", json=body)
+        data = await self._get_http(workspace_id).put(
+            f"/api/v1/assets/{asset_id}", json=body
+        )
         result = AssetUploadSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
@@ -829,6 +896,7 @@ class AsyncAssetsResource:
         exclude_collections: list[str] | None = None,
         exclude_assets: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> CursorPagedList[AssetSearch]:
         """
         List assets for a hub profile with cursor-based pagination.
@@ -854,11 +922,12 @@ class AsyncAssetsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             page = await client.assets.filter(
                 "01965f7a-0000-7000-8000-000000000002",
                 page_size=20,
                 types=["Media"],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -881,7 +950,7 @@ class AsyncAssetsResource:
         body = _build_filter_body(
             page_size, only_archived, exclude_collections, exclude_assets, types, cursor
         )
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/assets/{hub_profile_id}/filter", json=body
         )
         result = CursorPagedList[AssetSearch].model_validate(data)
@@ -899,6 +968,7 @@ class AsyncAssetsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_medias: list[str] | None = None,
+        workspace_id: str,
     ) -> list[AssetSearch]:
         """
         Search assets in a hub profile by name or keyword.
@@ -920,11 +990,12 @@ class AsyncAssetsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             results = await client.assets.search(
                 "01965f7a-0000-7000-8000-000000000002",
                 search="intro",
                 types=["Media"],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -944,7 +1015,7 @@ class AsyncAssetsResource:
         body = _build_search_body(
             search, types, exclude_categories, exclude_collections, exclude_medias
         )
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/assets/{hub_profile_id}/search", json=body
         )
         return [AssetSearch.model_validate(item) for item in (data or [])]
@@ -958,6 +1029,7 @@ class AsyncAssetsResource:
         exclude_collections: list[str] | None = None,
         exclude_assets: list[str] | None = None,
         types: list[str] | None = None,
+        workspace_id: str,
     ) -> AsyncIterator[AssetSearch]:
         """
         Async-iterate over all assets for a hub profile across all pages.
@@ -966,8 +1038,11 @@ class AsyncAssetsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            async for asset in client.assets.filter_all(hub_profile_id):
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            async for asset in client.assets.filter_all(
+                hub_profile_id,
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            ):
                 print(asset.name)
         ```
         """
@@ -981,6 +1056,7 @@ class AsyncAssetsResource:
                 exclude_collections=exclude_collections,
                 exclude_assets=exclude_assets,
                 types=types,
+                workspace_id=workspace_id,
             )
             for item in page.items:
                 yield item
@@ -997,14 +1073,19 @@ class AsyncAssetsResource:
         exclude_categories: list[str] | None = None,
         exclude_collections: list[str] | None = None,
         exclude_medias: list[str] | None = None,
+        workspace_id: str,
     ) -> AsyncIterator[AssetSearch]:
         """
         Async-iterate over all asset search results.
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            async for asset in client.assets.search_all(hub_profile_id, search="intro"):
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            async for asset in client.assets.search_all(
+                hub_profile_id,
+                search="intro",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            ):
                 print(asset.name)
         ```
         """
@@ -1015,5 +1096,6 @@ class AsyncAssetsResource:
             exclude_categories=exclude_categories,
             exclude_collections=exclude_collections,
             exclude_medias=exclude_medias,
+            workspace_id=workspace_id,
         ):
             yield item

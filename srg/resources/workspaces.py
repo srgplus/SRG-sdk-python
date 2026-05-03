@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from srg._upload import (
     upload_to_signed_url,
     upload_to_signed_url_async,
 )
+from srg.exceptions import SRGError
 from srg.schemas.common import FileUploadParameters
 from srg.schemas.hub_profile import MinimalHubProfile
 from srg.schemas.workspace import (
@@ -41,11 +43,18 @@ def _build_action_body(
 
 
 class WorkspacesResource:
-    def __init__(self, http: SyncHTTPClient, workspace_id: str | None = None) -> None:
-        self._http = http
-        self._workspace_id = workspace_id
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
 
-    def get(self, workspace_id: str | None = None) -> Workspace:
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    def get(self, workspace_id: str) -> Workspace:
         """
         Get a workspace by ID.
 
@@ -60,8 +69,8 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        workspace = client.workspaces.get()
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        workspace = client.workspaces.get("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -94,13 +103,12 @@ class WorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = self._http.get(f"/api/v1/workspaces/{wid}")
+        data = self._get_http(workspace_id).get(f"/api/v1/workspaces/{workspace_id}")
         return Workspace.model_validate(data)
 
     def update(
         self,
-        workspace_id: str | None = None,
+        workspace_id: str,
         *,
         name: str,
         cover_image: str | Path | None = None,
@@ -133,8 +141,9 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         workspace = client.workspaces.update(
+            "01965f7a-0000-7000-8000-000000000001",
             name="Acme Corp (New)",
             cover_image="/path/to/cover.jpg",
         )
@@ -160,7 +169,6 @@ class WorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
         if cover_image is not None and cover is None:
             cover = FileUploadParameters(
                 extension=extension_from_source(cover_image),
@@ -169,19 +177,19 @@ class WorkspacesResource:
         body: dict = {"name": name}
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-        data = self._http.put(f"/api/v1/workspaces/{wid}", json=body)
+        data = self._get_http(workspace_id).put(
+            f"/api/v1/workspaces/{workspace_id}", json=body
+        )
         result = WorkspaceSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
             upload_to_signed_url(result.cover_signed_url.url, cover_image)
 
         if cover_image is not None:
-            return self.get(wid)
+            return self.get(workspace_id)
         return result
 
-    def get_hub_profiles(
-        self, workspace_id: str | None = None
-    ) -> list[MinimalHubProfile]:
+    def get_hub_profiles(self, workspace_id: str) -> list[MinimalHubProfile]:
         """
         Get all hub profiles in a workspace.
 
@@ -197,8 +205,8 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        profiles = client.workspaces.get_hub_profiles()
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        profiles = client.workspaces.get_hub_profiles("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -215,13 +223,14 @@ class WorkspacesResource:
         ]
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = self._http.get(f"/api/v1/workspaces/{wid}/hub-profiles")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/hub-profiles"
+        )
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     def create_action(
         self,
-        workspace_id: str | None = None,
+        workspace_id: str,
         *,
         title: str,
         metadata: Any,  # noqa: ANN401
@@ -252,8 +261,9 @@ class WorkspacesResource:
         ```python
         from sdk.schemas.workspace import ProgressionUpdatedMetadata
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         action_id = client.workspaces.create_action(
+            "01965f7a-0000-7000-8000-000000000001",
             title="Notify on completion",
             metadata=ProgressionUpdatedMetadata(
                 webhook_url="https://hooks.example.com/srg"
@@ -268,14 +278,15 @@ class WorkspacesResource:
         "01965f7a-0000-7000-8000-000000000040"
         ```
         """
-        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        data = self._http.post(f"/api/v1/workspaces/{wid}/actions", json=body)
+        data = self._get_http(workspace_id).post(
+            f"/api/v1/workspaces/{workspace_id}/actions", json=body
+        )
         if isinstance(data, dict):
             return data.get("id", "")
         return str(data or "")
 
-    def list_actions(self, workspace_id: str | None = None) -> list[MinimalAction]:
+    def list_actions(self, workspace_id: str) -> list[MinimalAction]:
         """
         List all automation actions for a workspace.
 
@@ -291,8 +302,8 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        actions = client.workspaces.list_actions()
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        actions = client.workspaces.list_actions("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -307,11 +318,12 @@ class WorkspacesResource:
         ]
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = self._http.get(f"/api/v1/workspaces/{wid}/actions")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/actions"
+        )
         return [MinimalAction.model_validate(item) for item in (data or [])]
 
-    def get_action(self, action_id: str, *, workspace_id: str | None = None) -> Action:
+    def get_action(self, action_id: str, *, workspace_id: str) -> Action:
         """
         Get an automation action by ID.
 
@@ -327,8 +339,11 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        action = client.workspaces.get_action("01965f7a-0000-7000-8000-000000000040")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        action = client.workspaces.get_action(
+            "01965f7a-0000-7000-8000-000000000040",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -355,15 +370,16 @@ class WorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = self._http.get(f"/api/v1/workspaces/{wid}/actions/{action_id}")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
+        )
         return Action.model_validate(data)
 
     def update_action(
         self,
         action_id: str,
         *,
-        workspace_id: str | None = None,
+        workspace_id: str,
         title: str,
         metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
@@ -390,9 +406,10 @@ class WorkspacesResource:
         ```python
         from sdk.schemas.workspace import ProgressionUpdatedMetadata
 
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.workspaces.update_action(
             "01965f7a-0000-7000-8000-000000000040",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
             title="Notify on completion (updated)",
             metadata=ProgressionUpdatedMetadata(
                 webhook_url="https://hooks.example.com/srg-v2"
@@ -401,14 +418,13 @@ class WorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        return self._http.put(
-            f"/api/v1/workspaces/{wid}/actions/{action_id}",
+        return self._get_http(workspace_id).put(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
             json=body,
         )
 
-    def delete_action(self, action_id: str, *, workspace_id: str | None = None) -> None:
+    def delete_action(self, action_id: str, *, workspace_id: str) -> None:
         """
         Delete an automation action.
 
@@ -421,20 +437,52 @@ class WorkspacesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.workspaces.delete_action("01965f7a-0000-7000-8000-000000000040")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.workspaces.delete_action(
+            "01965f7a-0000-7000-8000-000000000040",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        self._http.delete(f"/api/v1/workspaces/{wid}/actions/{action_id}")
+        self._get_http(workspace_id).delete(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
+        )
+
+    def list_configured(self) -> list[Workspace]:
+        """Return workspace details for every registered API key.
+
+        Iterates over all workspace IDs in the internal registry and fetches
+        full workspace information for each one.  Use this to inspect which
+        workspaces the client has access to without knowing the IDs upfront.
+
+        Returns:
+            List of :class:`~srg.schemas.workspace.Workspace` objects, one per
+            registered API key.
+
+        Example:
+        ```python
+        client = SRGClient(api_keys=["srgplus_ws1", "srgplus_ws2"])
+        workspaces = client.workspaces.list_configured()
+        for ws in workspaces:
+            print(ws.id, ws.name)
+        ```
+        """
+        return [self.get(ws_id) for ws_id in self._registry]
 
 
 class AsyncWorkspacesResource:
-    def __init__(self, http: AsyncHTTPClient, workspace_id: str | None = None) -> None:
-        self._http = http
-        self._workspace_id = workspace_id
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
 
-    async def get(self, workspace_id: str | None = None) -> Workspace:
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    async def get(self, workspace_id: str) -> Workspace:
         """
         Get a workspace by ID.
 
@@ -449,8 +497,8 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            workspace = await client.workspaces.get()
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            workspace = await client.workspaces.get("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -481,13 +529,14 @@ class AsyncWorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = await self._http.get(f"/api/v1/workspaces/{wid}")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}"
+        )
         return Workspace.model_validate(data)
 
     async def update(
         self,
-        workspace_id: str | None = None,
+        workspace_id: str,
         *,
         name: str,
         cover_image: str | Path | None = None,
@@ -520,8 +569,9 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             workspace = await client.workspaces.update(
+                "01965f7a-0000-7000-8000-000000000001",
                 name="Acme Corp (New)",
                 cover_image="/path/to/cover.jpg",
             )
@@ -547,7 +597,6 @@ class AsyncWorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
         if cover_image is not None and cover is None:
             cover = FileUploadParameters(
                 extension=extension_from_source(cover_image),
@@ -556,19 +605,19 @@ class AsyncWorkspacesResource:
         body: dict = {"name": name}
         if cover is not None:
             body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-        data = await self._http.put(f"/api/v1/workspaces/{wid}", json=body)
+        data = await self._get_http(workspace_id).put(
+            f"/api/v1/workspaces/{workspace_id}", json=body
+        )
         result = WorkspaceSignedUrl.model_validate(data)
 
         if cover_image is not None and result.cover_signed_url is not None:
             await upload_to_signed_url_async(result.cover_signed_url.url, cover_image)
 
         if cover_image is not None:
-            return await self.get(wid)
+            return await self.get(workspace_id)
         return result
 
-    async def get_hub_profiles(
-        self, workspace_id: str | None = None
-    ) -> list[MinimalHubProfile]:
+    async def get_hub_profiles(self, workspace_id: str) -> list[MinimalHubProfile]:
         """
         Get all hub profiles in a workspace.
 
@@ -580,8 +629,8 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            profiles = await client.workspaces.get_hub_profiles()
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            profiles = await client.workspaces.get_hub_profiles("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -598,13 +647,14 @@ class AsyncWorkspacesResource:
         ]
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = await self._http.get(f"/api/v1/workspaces/{wid}/hub-profiles")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/hub-profiles"
+        )
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     async def create_action(
         self,
-        workspace_id: str | None = None,
+        workspace_id: str,
         *,
         title: str,
         metadata: Any,  # noqa: ANN401
@@ -629,8 +679,9 @@ class AsyncWorkspacesResource:
         ```python
         from sdk.schemas.workspace import ProgressionUpdatedMetadata
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             action_id = await client.workspaces.create_action(
+                "01965f7a-0000-7000-8000-000000000001",
                 title="Notify on completion",
                 metadata=ProgressionUpdatedMetadata(
                     webhook_url="https://hooks.example.com/srg"
@@ -644,16 +695,15 @@ class AsyncWorkspacesResource:
         "01965f7a-0000-7000-8000-000000000040"
         ```
         """
-        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        data = await self._http.post(f"/api/v1/workspaces/{wid}/actions", json=body)
+        data = await self._get_http(workspace_id).post(
+            f"/api/v1/workspaces/{workspace_id}/actions", json=body
+        )
         if isinstance(data, dict):
             return data.get("id", "")
         return str(data or "")
 
-    async def list_actions(
-        self, workspace_id: str | None = None
-    ) -> list[MinimalAction]:
+    async def list_actions(self, workspace_id: str) -> list[MinimalAction]:
         """
         List all automation actions for a workspace.
 
@@ -665,8 +715,8 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            actions = await client.workspaces.list_actions()
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            actions = await client.workspaces.list_actions("01965f7a-0000-7000-8000-000000000001")
         ```
 
         Example response:
@@ -681,13 +731,12 @@ class AsyncWorkspacesResource:
         ]
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = await self._http.get(f"/api/v1/workspaces/{wid}/actions")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/actions"
+        )
         return [MinimalAction.model_validate(item) for item in (data or [])]
 
-    async def get_action(
-        self, action_id: str, *, workspace_id: str | None = None
-    ) -> Action:
+    async def get_action(self, action_id: str, *, workspace_id: str) -> Action:
         """
         Get an automation action by ID.
 
@@ -700,9 +749,10 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             action = await client.workspaces.get_action(
-                "01965f7a-0000-7000-8000-000000000040"
+                "01965f7a-0000-7000-8000-000000000040",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -730,15 +780,16 @@ class AsyncWorkspacesResource:
         )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        data = await self._http.get(f"/api/v1/workspaces/{wid}/actions/{action_id}")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
+        )
         return Action.model_validate(data)
 
     async def update_action(
         self,
         action_id: str,
         *,
-        workspace_id: str | None = None,
+        workspace_id: str,
         title: str,
         metadata: Any,  # noqa: ANN401
         hub_profile_ids: list[str] | None = None,
@@ -762,9 +813,10 @@ class AsyncWorkspacesResource:
         ```python
         from sdk.schemas.workspace import ProgressionUpdatedMetadata
 
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.workspaces.update_action(
                 "01965f7a-0000-7000-8000-000000000040",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
                 title="Notify on completion (updated)",
                 metadata=ProgressionUpdatedMetadata(
                     webhook_url="https://hooks.example.com/srg-v2"
@@ -772,16 +824,13 @@ class AsyncWorkspacesResource:
             )
         ```
         """
-        wid = workspace_id or self._workspace_id
         body = _build_action_body(title, metadata, hub_profile_ids, details)
-        return await self._http.put(
-            f"/api/v1/workspaces/{wid}/actions/{action_id}",
+        return await self._get_http(workspace_id).put(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}",
             json=body,
         )
 
-    async def delete_action(
-        self, action_id: str, *, workspace_id: str | None = None
-    ) -> None:
+    async def delete_action(self, action_id: str, *, workspace_id: str) -> None:
         """
         Delete an automation action.
 
@@ -791,11 +840,35 @@ class AsyncWorkspacesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.workspaces.delete_action(
-                "01965f7a-0000-7000-8000-000000000040"
+                "01965f7a-0000-7000-8000-000000000040",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        wid = workspace_id or self._workspace_id
-        await self._http.delete(f"/api/v1/workspaces/{wid}/actions/{action_id}")
+        await self._get_http(workspace_id).delete(
+            f"/api/v1/workspaces/{workspace_id}/actions/{action_id}"
+        )
+
+    async def list_configured(self) -> list[Workspace]:
+        """Return workspace details for every registered API key.
+
+        Iterates over all workspace IDs in the internal registry and fetches
+        full workspace information for each one.
+
+        Returns:
+            List of :class:`~srg.schemas.workspace.Workspace` objects, one per
+            registered API key.
+
+        Example:
+        ```python
+        async with AsyncSRGClient(api_keys=["srgplus_ws1", "srgplus_ws2"]) as client:
+            workspaces = await client.workspaces.list_configured()
+            for ws in workspaces:
+                print(ws.id, ws.name)
+        ```
+        """
+        return list(
+            await asyncio.gather(*[self.get(ws_id) for ws_id in self._registry])
+        )

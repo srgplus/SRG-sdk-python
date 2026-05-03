@@ -1,6 +1,7 @@
 import builtins
 
 from srg._http import AsyncHTTPClient, SyncHTTPClient
+from srg.exceptions import SRGError
 from srg.schemas.permission import (
     GetPermissionGroup,
     PermissionGroup,
@@ -8,10 +9,20 @@ from srg.schemas.permission import (
 
 
 class PermissionGroupsResource:
-    def __init__(self, http: SyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
 
-    def create(self, target_type: str, target_id: str, *, name: str) -> str:
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    def create(
+        self, target_type: str, target_id: str, *, name: str, workspace_id: str
+    ) -> str:
         """
         Create a new permission group on a target.
 
@@ -29,11 +40,12 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         group_id = client.permission_groups.create(
             "HubProfile",
             "01965f7a-0000-7000-8000-000000000002",
             name="Content Editors",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -42,7 +54,7 @@ class PermissionGroupsResource:
         "01965f7a-0000-7000-8000-000000000030"
         ```
         """
-        data = self._http.post(
+        data = self._get_http(workspace_id).post(
             f"/api/v1/permission-groups/{target_type}/{target_id}",
             json={"name": name},
         )
@@ -50,7 +62,9 @@ class PermissionGroupsResource:
             return data.get("id", "")
         return str(data or "")
 
-    def list(self, target_type: str, target_id: str) -> list[PermissionGroup]:
+    def list(
+        self, target_type: str, target_id: str, *, workspace_id: str
+    ) -> list[PermissionGroup]:
         """
         List all permission groups for a target.
 
@@ -66,10 +80,11 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         groups = client.permission_groups.list(
             "HubProfile",
             "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -93,12 +108,12 @@ class PermissionGroupsResource:
         ]
         ```
         """
-        data = self._http.get(
+        data = self._get_http(workspace_id).get(
             f"/api/v1/permission-groups/{target_type}/{target_id}/list"
         )
         return [PermissionGroup.model_validate(item) for item in (data or [])]
 
-    def get(self, group_id: str) -> GetPermissionGroup:
+    def get(self, group_id: str, *, workspace_id: str) -> GetPermissionGroup:
         """
         Get a permission group by ID, including its members.
 
@@ -113,8 +128,11 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        group = client.permission_groups.get("01965f7a-0000-7000-8000-000000000030")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        group = client.permission_groups.get(
+            "01965f7a-0000-7000-8000-000000000030",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -144,10 +162,10 @@ class PermissionGroupsResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/permission-groups/{group_id}")
+        data = self._get_http(workspace_id).get(f"/api/v1/permission-groups/{group_id}")
         return GetPermissionGroup.model_validate(data)
 
-    def update(self, group_id: str, *, name: str) -> dict | None:
+    def update(self, group_id: str, *, name: str, workspace_id: str) -> dict | None:
         """
         Update the name of a permission group.
 
@@ -163,18 +181,19 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.permission_groups.update(
             "01965f7a-0000-7000-8000-000000000030",
             name="Senior Editors",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        return self._http.put(
+        return self._get_http(workspace_id).put(
             f"/api/v1/permission-groups/{group_id}", json={"name": name}
         )
 
-    def delete(self, group_id: str) -> None:
+    def delete(self, group_id: str, *, workspace_id: str) -> None:
         """
         Delete a permission group.
 
@@ -186,13 +205,18 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.permission_groups.delete("01965f7a-0000-7000-8000-000000000030")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.permission_groups.delete(
+            "01965f7a-0000-7000-8000-000000000030",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        self._http.delete(f"/api/v1/permission-groups/{group_id}")
+        self._get_http(workspace_id).delete(f"/api/v1/permission-groups/{group_id}")
 
-    def add_users(self, group_id: str, *, user_ids: builtins.list[str]) -> dict | None:
+    def add_users(
+        self, group_id: str, *, user_ids: builtins.list[str], workspace_id: str
+    ) -> dict | None:
         """
         Add users to a permission group.
 
@@ -208,22 +232,23 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.permission_groups.add_users(
             "01965f7a-0000-7000-8000-000000000030",
             user_ids=[
                 "01965f7a-0000-7000-8000-000000000007",
                 "01965f7a-0000-7000-8000-000000000008",
             ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        return self._http.post(
+        return self._get_http(workspace_id).post(
             f"/api/v1/permission-groups/{group_id}",
             json={"userIds": user_ids},
         )
 
-    def remove_user(self, group_id: str, user_id: str) -> None:
+    def remove_user(self, group_id: str, user_id: str, *, workspace_id: str) -> None:
         """
         Remove a user from a permission group.
 
@@ -236,21 +261,34 @@ class PermissionGroupsResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.permission_groups.remove_user(
             "01965f7a-0000-7000-8000-000000000030",
             "01965f7a-0000-7000-8000-000000000007",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        self._http.delete(f"/api/v1/permission-groups/{group_id}/{user_id}")
+        self._get_http(workspace_id).delete(
+            f"/api/v1/permission-groups/{group_id}/{user_id}"
+        )
 
 
 class AsyncPermissionGroupsResource:
-    def __init__(self, http: AsyncHTTPClient) -> None:
-        self._http = http
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
 
-    async def create(self, target_type: str, target_id: str, *, name: str) -> str:
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    async def create(
+        self, target_type: str, target_id: str, *, name: str, workspace_id: str
+    ) -> str:
         """
         Create a new permission group on a target.
 
@@ -268,11 +306,12 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             group_id = await client.permission_groups.create(
                 "HubProfile",
                 "01965f7a-0000-7000-8000-000000000002",
                 name="Content Editors",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -281,7 +320,7 @@ class AsyncPermissionGroupsResource:
         "01965f7a-0000-7000-8000-000000000030"
         ```
         """
-        data = await self._http.post(
+        data = await self._get_http(workspace_id).post(
             f"/api/v1/permission-groups/{target_type}/{target_id}",
             json={"name": name},
         )
@@ -289,7 +328,9 @@ class AsyncPermissionGroupsResource:
             return data.get("id", "")
         return str(data or "")
 
-    async def list(self, target_type: str, target_id: str) -> list[PermissionGroup]:
+    async def list(
+        self, target_type: str, target_id: str, *, workspace_id: str
+    ) -> list[PermissionGroup]:
         """
         List all permission groups for a target.
 
@@ -305,10 +346,11 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             groups = await client.permission_groups.list(
                 "HubProfile",
                 "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -325,12 +367,12 @@ class AsyncPermissionGroupsResource:
         ]
         ```
         """
-        data = await self._http.get(
+        data = await self._get_http(workspace_id).get(
             f"/api/v1/permission-groups/{target_type}/{target_id}/list"
         )
         return [PermissionGroup.model_validate(item) for item in (data or [])]
 
-    async def get(self, group_id: str) -> GetPermissionGroup:
+    async def get(self, group_id: str, *, workspace_id: str) -> GetPermissionGroup:
         """
         Get a permission group by ID, including its members.
 
@@ -345,9 +387,10 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             group = await client.permission_groups.get(
-                "01965f7a-0000-7000-8000-000000000030"
+                "01965f7a-0000-7000-8000-000000000030",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -372,10 +415,14 @@ class AsyncPermissionGroupsResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v1/permission-groups/{group_id}")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/permission-groups/{group_id}"
+        )
         return GetPermissionGroup.model_validate(data)
 
-    async def update(self, group_id: str, *, name: str) -> dict | None:
+    async def update(
+        self, group_id: str, *, name: str, workspace_id: str
+    ) -> dict | None:
         """
         Update the name of a permission group.
 
@@ -391,18 +438,19 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permission_groups.update(
                 "01965f7a-0000-7000-8000-000000000030",
                 name="Senior Editors",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.put(
+        return await self._get_http(workspace_id).put(
             f"/api/v1/permission-groups/{group_id}", json={"name": name}
         )
 
-    async def delete(self, group_id: str) -> None:
+    async def delete(self, group_id: str, *, workspace_id: str) -> None:
         """
         Delete a permission group.
 
@@ -414,16 +462,23 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permission_groups.delete(
-                "01965f7a-0000-7000-8000-000000000030"
+                "01965f7a-0000-7000-8000-000000000030",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.delete(f"/api/v1/permission-groups/{group_id}")
+        await self._get_http(workspace_id).delete(
+            f"/api/v1/permission-groups/{group_id}"
+        )
 
     async def add_users(
-        self, group_id: str, *, user_ids: builtins.list[str]
+        self,
+        group_id: str,
+        *,
+        user_ids: builtins.list[str],
+        workspace_id: str,
     ) -> dict | None:
         """
         Add users to a permission group.
@@ -440,22 +495,25 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permission_groups.add_users(
                 "01965f7a-0000-7000-8000-000000000030",
                 user_ids=[
                     "01965f7a-0000-7000-8000-000000000007",
                     "01965f7a-0000-7000-8000-000000000008",
                 ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.post(
+        return await self._get_http(workspace_id).post(
             f"/api/v1/permission-groups/{group_id}",
             json={"userIds": user_ids},
         )
 
-    async def remove_user(self, group_id: str, user_id: str) -> None:
+    async def remove_user(
+        self, group_id: str, user_id: str, *, workspace_id: str
+    ) -> None:
         """
         Remove a user from a permission group.
 
@@ -468,11 +526,14 @@ class AsyncPermissionGroupsResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.permission_groups.remove_user(
                 "01965f7a-0000-7000-8000-000000000030",
                 "01965f7a-0000-7000-8000-000000000007",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        await self._http.delete(f"/api/v1/permission-groups/{group_id}/{user_id}")
+        await self._get_http(workspace_id).delete(
+            f"/api/v1/permission-groups/{group_id}/{user_id}"
+        )
