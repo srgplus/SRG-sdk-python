@@ -6,3 +6,5 @@ uv.lock
 /.claude/
 /PLAN.md
 /dist/
+.venv/
+__pycache__/
