@@ -21,9 +21,16 @@ _AVAILABILITY_LEVEL = {"Public": 0, "Private": 1}
 
 
 class HubProfilesResource:
-    def __init__(self, http: SyncHTTPClient, workspace_id: str | None = None) -> None:
-        self._http = http
-        self._workspace_id = workspace_id
+    def __init__(self, registry: dict[str, SyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> SyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     def create(
         self,
@@ -40,7 +47,7 @@ class HubProfilesResource:
         cover_image: str | Path | None = None,
         avatar_extension: str | None = None,
         cover_extension: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str,
         widgets: list[dict] | None = None,
     ) -> GetHubProfile | HubProfileSignedUrls:
         """
@@ -91,13 +98,14 @@ class HubProfilesResource:
         Example:
         ```python
         # Auto-upload — pass a local path or external URL
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         profile = client.hub_profiles.create(
             name="Acme Academy",
             user_name="acme-academy",
             description="Official learning hub for Acme Corp employees.",
             avatar_image="/path/to/avatar.jpg",
             cover_image="https://example.com/cover.png",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         # profile is GetHubProfile with avatar and cover already populated
         ```
@@ -154,13 +162,12 @@ class HubProfilesResource:
             body["avatarExtension"] = avatar_extension
         if cover_extension is not None:
             body["coverExtension"] = cover_extension
-        effective_workspace_id = workspace_id or self._workspace_id
-        if effective_workspace_id is not None:
-            body["workspaceId"] = effective_workspace_id
+        if workspace_id is not None:
+            body["workspaceId"] = workspace_id
         if widgets is not None:
             body["widgets"] = widgets
 
-        data = self._http.post("/api/v1/hub-profiles", json=body)
+        data = self._get_http(workspace_id).post("/api/v1/hub-profiles", json=body)
         result = HubProfileSignedUrls.model_validate(data)
 
         if avatar_image is not None and result.avatar_signed_url is not None:
@@ -172,7 +179,7 @@ class HubProfilesResource:
             return self.get(result.id)
         return result
 
-    def get(self, hub_profile_id: str) -> GetHubProfile:
+    def get(self, hub_profile_id: str, *, workspace_id: str) -> GetHubProfile:
         """
         Get a hub profile by ID.
 
@@ -187,8 +194,11 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        profile = client.hub_profiles.get("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        profile = client.hub_profiles.get(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -231,10 +241,12 @@ class HubProfilesResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/hub-profiles/{hub_profile_id}")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/hub-profiles/{hub_profile_id}"
+        )
         return GetHubProfile.model_validate(data)
 
-    def get_by_username(self, username: str) -> GetHubProfile:
+    def get_by_username(self, username: str, *, workspace_id: str) -> GetHubProfile:
         """
         Get a hub profile by its username.
 
@@ -251,8 +263,11 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        profile = client.hub_profiles.get_by_username("acme-academy")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        profile = client.hub_profiles.get_by_username(
+            "acme-academy",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -276,10 +291,12 @@ class HubProfilesResource:
         )
         ```
         """
-        data = self._http.get(f"/api/v1/hub-profiles/username/{username}")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/hub-profiles/username/{username}"
+        )
         return GetHubProfile.model_validate(data)
 
-    def list(self) -> builtins.list[MinimalHubProfile]:
+    def list(self, *, workspace_id: str) -> builtins.list[MinimalHubProfile]:
         """
         List all hub profiles in the current workspace.
 
@@ -291,8 +308,10 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        profiles = client.hub_profiles.list()
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        profiles = client.hub_profiles.list(
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -315,10 +334,12 @@ class HubProfilesResource:
         ]
         ```
         """
-        data = self._http.get(f"/api/v1/workspaces/{self._workspace_id}/hub-profiles")
+        data = self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/hub-profiles"
+        )
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
-    def list_managed(self) -> builtins.list[MinimalHubProfile]:
+    def list_managed(self, *, workspace_id: str) -> builtins.list[MinimalHubProfile]:
         """
         List all hub profiles managed by the current user.
 
@@ -331,8 +352,10 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        managed = client.hub_profiles.list_managed()
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        managed = client.hub_profiles.list_managed(
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
 
         Example response:
@@ -349,7 +372,7 @@ class HubProfilesResource:
         ]
         ```
         """
-        data = self._http.get("/api/v1/hub-profiles/managed")
+        data = self._get_http(workspace_id).get("/api/v1/hub-profiles/managed")
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     def update(
@@ -369,6 +392,7 @@ class HubProfilesResource:
         avatar: FileUploadParameters | None = None,
         cover: FileUploadParameters | None = None,
         widgets: builtins.list[dict] | None = None,
+        workspace_id: str,
     ) -> GetHubProfile | HubProfileSignedUrls:
         """
         Update a hub profile's metadata and images.
@@ -413,12 +437,13 @@ class HubProfilesResource:
         Example:
         ```python
         # Auto-upload — pass a local path or external URL
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         profile = client.hub_profiles.update(
             "01965f7a-0000-7000-8000-000000000002",
             name="Acme Academy (Updated)",
             user_name="acme-academy",
             cover_image="/path/to/new_cover.png",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         # profile is GetHubProfile with cover already populated
         ```
@@ -477,7 +502,9 @@ class HubProfilesResource:
         if widgets is not None:
             body["widgets"] = widgets
 
-        data = self._http.put(f"/api/v1/hub-profiles/{hub_profile_id}", json=body)
+        data = self._get_http(workspace_id).put(
+            f"/api/v1/hub-profiles/{hub_profile_id}", json=body
+        )
         result = HubProfileSignedUrls.model_validate(data)
 
         if avatar_image is not None and result.avatar_signed_url is not None:
@@ -489,7 +516,7 @@ class HubProfilesResource:
             return self.get(hub_profile_id)
         return result
 
-    def archive(self, hub_profile_id: str) -> dict | None:
+    def archive(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Archive a hub profile.
 
@@ -505,13 +532,18 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.hub_profiles.archive("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.hub_profiles.archive(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
+        return self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/archive"
+        )
 
-    def restore(self, hub_profile_id: str) -> dict | None:
+    def restore(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Restore a previously archived hub profile.
 
@@ -526,13 +558,18 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.hub_profiles.restore("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.hub_profiles.restore(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
+        return self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/restore"
+        )
 
-    def delete(self, hub_profile_id: str) -> None:
+    def delete(self, hub_profile_id: str, *, workspace_id: str) -> None:
         """
         Permanently delete a hub profile.
 
@@ -544,13 +581,16 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.hub_profiles.delete("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.hub_profiles.delete(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        self._http.delete(f"/api/v1/hub-profiles/{hub_profile_id}")
+        self._get_http(workspace_id).delete(f"/api/v1/hub-profiles/{hub_profile_id}")
 
-    def join(self, hub_profile_id: str) -> dict | None:
+    def join(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Join a public hub profile as the current user.
 
@@ -565,15 +605,21 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.hub_profiles.join("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.hub_profiles.join(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        return self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
+        return self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/join"
+        )
 
     def filter(
         self,
         *,
+        workspace_id: str,
         ids: builtins.list[str],
         availability_level: AvailabilityLevel | None = None,
     ) -> builtins.list[HubProfileFilter]:
@@ -594,12 +640,13 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         profiles = client.hub_profiles.filter(
             ids=[
                 "01965f7a-0000-7000-8000-000000000002",
                 "01965f7a-0000-7000-8000-000000000009",
-            ]
+            ],
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
 
@@ -629,7 +676,9 @@ class HubProfilesResource:
             body["availabilityLevel"] = _AVAILABILITY_LEVEL.get(
                 availability_level, availability_level
             )
-        data = self._http.post("/api/v1/hub-profiles/filter", json=body)
+        data = self._get_http(workspace_id).post(
+            "/api/v1/hub-profiles/filter", json=body
+        )
         return [HubProfileFilter.model_validate(item) for item in (data or [])]
 
     def move_to_workspace(self, hub_profile_id: str, workspace_id: str) -> dict | None:
@@ -648,18 +697,20 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
+        client = SRGClient(api_keys=["srgplus_your_key"])
         client.hub_profiles.move_to_workspace(
             "01965f7a-0000-7000-8000-000000000002",
             "01965f7a-0000-7000-8000-000000000050",
         )
         ```
         """
-        return self._http.post(
+        return self._get_http(workspace_id).post(
             f"/api/v1/hub-profiles/{hub_profile_id}/move-to/workspaces/{workspace_id}"
         )
 
-    def turn_on_community(self, hub_profile_id: str) -> dict | None:
+    def turn_on_community(
+        self, hub_profile_id: str, *, workspace_id: str
+    ) -> dict | None:
         """
         Enable community features for a hub profile.
 
@@ -675,19 +726,29 @@ class HubProfilesResource:
 
         Example:
         ```python
-        client = SRGClient(api_key="srgplus_your_key")
-        client.hub_profiles.turn_on_community("01965f7a-0000-7000-8000-000000000002")
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        client.hub_profiles.turn_on_community(
+            "01965f7a-0000-7000-8000-000000000002",
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
         ```
         """
-        return self._http.post(
+        return self._get_http(workspace_id).post(
             f"/api/v1/hub-profiles/{hub_profile_id}/turn-on-community"
         )
 
 
 class AsyncHubProfilesResource:
-    def __init__(self, http: AsyncHTTPClient, workspace_id: str | None = None) -> None:
-        self._http = http
-        self._workspace_id = workspace_id
+    def __init__(self, registry: dict[str, AsyncHTTPClient]) -> None:
+        self._registry = registry
+
+    def _resolve_workspace_id(self, workspace_id: str) -> str:
+        if workspace_id not in self._registry:
+            raise SRGError(f"No API key registered for workspace '{workspace_id}'")
+        return workspace_id
+
+    def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
+        return self._registry[self._resolve_workspace_id(workspace_id)]
 
     async def create(
         self,
@@ -704,7 +765,7 @@ class AsyncHubProfilesResource:
         cover_image: str | Path | None = None,
         avatar_extension: str | None = None,
         cover_extension: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str,
         widgets: list[dict] | None = None,
     ) -> GetHubProfile | HubProfileSignedUrls:
         """
@@ -755,12 +816,13 @@ class AsyncHubProfilesResource:
         Example:
         ```python
         # Auto-upload — pass a local path or external URL
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             profile = await client.hub_profiles.create(
                 name="Acme Academy",
                 user_name="acme-academy",
                 avatar_image="/path/to/avatar.jpg",
                 cover_image="https://example.com/cover.png",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         # profile is GetHubProfile with avatar and cover already populated
         ```
@@ -817,13 +879,14 @@ class AsyncHubProfilesResource:
             body["avatarExtension"] = avatar_extension
         if cover_extension is not None:
             body["coverExtension"] = cover_extension
-        effective_workspace_id = workspace_id or self._workspace_id
-        if effective_workspace_id is not None:
-            body["workspaceId"] = effective_workspace_id
+        if workspace_id is not None:
+            body["workspaceId"] = workspace_id
         if widgets is not None:
             body["widgets"] = widgets
 
-        data = await self._http.post("/api/v1/hub-profiles", json=body)
+        data = await self._get_http(workspace_id).post(
+            "/api/v1/hub-profiles", json=body
+        )
         result = HubProfileSignedUrls.model_validate(data)
 
         if avatar_image is not None and result.avatar_signed_url is not None:
@@ -835,7 +898,7 @@ class AsyncHubProfilesResource:
             return await self.get(result.id)
         return result
 
-    async def get(self, hub_profile_id: str) -> GetHubProfile:
+    async def get(self, hub_profile_id: str, *, workspace_id: str) -> GetHubProfile:
         """
         Get a hub profile by ID.
 
@@ -850,9 +913,10 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             profile = await client.hub_profiles.get(
-                "01965f7a-0000-7000-8000-000000000002"
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -877,10 +941,14 @@ class AsyncHubProfilesResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v1/hub-profiles/{hub_profile_id}")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/hub-profiles/{hub_profile_id}"
+        )
         return GetHubProfile.model_validate(data)
 
-    async def get_by_username(self, username: str) -> GetHubProfile:
+    async def get_by_username(
+        self, username: str, *, workspace_id: str
+    ) -> GetHubProfile:
         """
         Get a hub profile by its username.
 
@@ -895,8 +963,11 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            profile = await client.hub_profiles.get_by_username("acme-academy")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            profile = await client.hub_profiles.get_by_username(
+                "acme-academy",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
 
         Example response:
@@ -920,10 +991,12 @@ class AsyncHubProfilesResource:
         )
         ```
         """
-        data = await self._http.get(f"/api/v1/hub-profiles/username/{username}")
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/hub-profiles/username/{username}"
+        )
         return GetHubProfile.model_validate(data)
 
-    async def list(self) -> builtins.list[MinimalHubProfile]:
+    async def list(self, *, workspace_id: str) -> builtins.list[MinimalHubProfile]:
         """
         List all hub profiles in the current workspace.
 
@@ -935,8 +1008,10 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            profiles = await client.hub_profiles.list()
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            profiles = await client.hub_profiles.list(
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
 
         Example response:
@@ -953,17 +1028,14 @@ class AsyncHubProfilesResource:
         ]
         ```
         """
-        if not self._workspace_id:
-            raw: builtins.list = await self._http.get("/api/v1/workspaces") or []
-            if not raw:
-                raise SRGError("No workspaces found for this API key")
-            self._workspace_id = raw[0]["id"]
-        data = await self._http.get(
-            f"/api/v1/workspaces/{self._workspace_id}/hub-profiles"
+        data = await self._get_http(workspace_id).get(
+            f"/api/v1/workspaces/{workspace_id}/hub-profiles"
         )
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
-    async def list_managed(self) -> builtins.list[MinimalHubProfile]:
+    async def list_managed(
+        self, *, workspace_id: str
+    ) -> builtins.list[MinimalHubProfile]:
         """
         List all hub profiles managed by the current user.
 
@@ -975,8 +1047,10 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            managed = await client.hub_profiles.list_managed()
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            managed = await client.hub_profiles.list_managed(
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
 
         Example response:
@@ -993,7 +1067,7 @@ class AsyncHubProfilesResource:
         ]
         ```
         """
-        data = await self._http.get("/api/v1/hub-profiles/managed")
+        data = await self._get_http(workspace_id).get("/api/v1/hub-profiles/managed")
         return [MinimalHubProfile.model_validate(item) for item in (data or [])]
 
     async def update(
@@ -1013,6 +1087,7 @@ class AsyncHubProfilesResource:
         avatar: FileUploadParameters | None = None,
         cover: FileUploadParameters | None = None,
         widgets: builtins.list[dict] | None = None,
+        workspace_id: str,
     ) -> GetHubProfile | HubProfileSignedUrls:
         """
         Update a hub profile's metadata and images.
@@ -1057,12 +1132,13 @@ class AsyncHubProfilesResource:
         Example:
         ```python
         # Auto-upload — pass a local path or external URL
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             profile = await client.hub_profiles.update(
                 "01965f7a-0000-7000-8000-000000000002",
                 name="Acme Academy (Updated)",
                 user_name="acme-academy",
                 cover_image="/path/to/new_cover.png",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         # profile is GetHubProfile with cover already populated
         ```
@@ -1121,7 +1197,9 @@ class AsyncHubProfilesResource:
         if widgets is not None:
             body["widgets"] = widgets
 
-        data = await self._http.put(f"/api/v1/hub-profiles/{hub_profile_id}", json=body)
+        data = await self._get_http(workspace_id).put(
+            f"/api/v1/hub-profiles/{hub_profile_id}", json=body
+        )
         result = HubProfileSignedUrls.model_validate(data)
 
         if avatar_image is not None and result.avatar_signed_url is not None:
@@ -1133,7 +1211,7 @@ class AsyncHubProfilesResource:
             return await self.get(hub_profile_id)
         return result
 
-    async def archive(self, hub_profile_id: str) -> dict | None:
+    async def archive(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Archive a hub profile.
 
@@ -1149,13 +1227,18 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            await client.hub_profiles.archive("01965f7a-0000-7000-8000-000000000002")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            await client.hub_profiles.archive(
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
         """
-        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/archive")
+        return await self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/archive"
+        )
 
-    async def restore(self, hub_profile_id: str) -> dict | None:
+    async def restore(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Restore a previously archived hub profile.
 
@@ -1169,13 +1252,18 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            await client.hub_profiles.restore("01965f7a-0000-7000-8000-000000000002")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            await client.hub_profiles.restore(
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
         """
-        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/restore")
+        return await self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/restore"
+        )
 
-    async def delete(self, hub_profile_id: str) -> None:
+    async def delete(self, hub_profile_id: str, *, workspace_id: str) -> None:
         """
         Permanently delete a hub profile.
 
@@ -1187,13 +1275,18 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            await client.hub_profiles.delete("01965f7a-0000-7000-8000-000000000002")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            await client.hub_profiles.delete(
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
         """
-        await self._http.delete(f"/api/v1/hub-profiles/{hub_profile_id}")
+        await self._get_http(workspace_id).delete(
+            f"/api/v1/hub-profiles/{hub_profile_id}"
+        )
 
-    async def join(self, hub_profile_id: str) -> dict | None:
+    async def join(self, hub_profile_id: str, *, workspace_id: str) -> dict | None:
         """
         Join a public hub profile as the current user.
 
@@ -1207,15 +1300,21 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-            await client.hub_profiles.join("01965f7a-0000-7000-8000-000000000002")
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+            await client.hub_profiles.join(
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
+            )
         ```
         """
-        return await self._http.post(f"/api/v1/hub-profiles/{hub_profile_id}/join")
+        return await self._get_http(workspace_id).post(
+            f"/api/v1/hub-profiles/{hub_profile_id}/join"
+        )
 
     async def filter(
         self,
         *,
+        workspace_id: str,
         ids: builtins.list[str],
         availability_level: AvailabilityLevel | None = None,
     ) -> builtins.list[HubProfileFilter]:
@@ -1236,12 +1335,13 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             profiles = await client.hub_profiles.filter(
                 ids=[
                     "01965f7a-0000-7000-8000-000000000002",
                     "01965f7a-0000-7000-8000-000000000009",
-                ]
+                ],
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
 
@@ -1265,7 +1365,9 @@ class AsyncHubProfilesResource:
             body["availabilityLevel"] = _AVAILABILITY_LEVEL.get(
                 availability_level, availability_level
             )
-        data = await self._http.post("/api/v1/hub-profiles/filter", json=body)
+        data = await self._get_http(workspace_id).post(
+            "/api/v1/hub-profiles/filter", json=body
+        )
         return [HubProfileFilter.model_validate(item) for item in (data or [])]
 
     async def move_to_workspace(
@@ -1285,18 +1387,20 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.hub_profiles.move_to_workspace(
                 "01965f7a-0000-7000-8000-000000000002",
                 "01965f7a-0000-7000-8000-000000000050",
             )
         ```
         """
-        return await self._http.post(
+        return await self._get_http(workspace_id).post(
             f"/api/v1/hub-profiles/{hub_profile_id}/move-to/workspaces/{workspace_id}"
         )
 
-    async def turn_on_community(self, hub_profile_id: str) -> dict | None:
+    async def turn_on_community(
+        self, hub_profile_id: str, *, workspace_id: str
+    ) -> dict | None:
         """
         Enable community features for a hub profile.
 
@@ -1311,12 +1415,13 @@ class AsyncHubProfilesResource:
 
         Example:
         ```python
-        async with AsyncSRGClient(api_key="srgplus_your_key") as client:
+        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
             await client.hub_profiles.turn_on_community(
-                "01965f7a-0000-7000-8000-000000000002"
+                "01965f7a-0000-7000-8000-000000000002",
+                workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        return await self._http.post(
+        return await self._get_http(workspace_id).post(
             f"/api/v1/hub-profiles/{hub_profile_id}/turn-on-community"
         )

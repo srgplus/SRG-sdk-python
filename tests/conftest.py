@@ -25,6 +25,16 @@ WORKSPACE_ID = "workspace-uuid-1"
 
 
 @pytest.fixture
+def mock_registry(mock_http: Mock) -> dict:
+    return {WORKSPACE_ID: mock_http}
+
+
+@pytest.fixture
+def async_mock_registry(async_mock_http: AsyncMock) -> dict:
+    return {WORKSPACE_ID: async_mock_http}
+
+
+@pytest.fixture
 def content_payload() -> dict:
     return {
         "id": CONTENT_ID,

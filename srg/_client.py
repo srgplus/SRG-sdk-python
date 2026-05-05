@@ -1,10 +1,8 @@
 import os
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
 from functools import cached_property
 
-from srg._http import AsyncHTTPClient, SyncHTTPClient, _active_api_key
-from srg.exceptions import SRGError
+from srg._http import AsyncHTTPClient, SyncHTTPClient
+from srg.exceptions import AuthenticationError, SRGError
 from srg.resources.assets import AssetsResource, AsyncAssetsResource
 from srg.resources.channels import AsyncChannelsResource, ChannelsResource
 from srg.resources.contents import AsyncContentsResource, ContentsResource
@@ -21,14 +19,17 @@ from srg.resources.workspaces import AsyncWorkspacesResource, WorkspacesResource
 _DEFAULT_BASE_URL = "https://gateway.srgplus.com"
 
 
-def _resolve_api_key(value: str | None) -> str | None:
-    """Return ``value``, falling back to ``SRG_API_KEY`` env var, or ``None``.
-
-    Unlike the previous implementation, an absent api key is allowed — callers
-    that want eager bootstrap behaviour MUST still pass one, but server
-    processes that bind keys per-request can leave it unset.
-    """
-    return value or os.environ.get("SRG_API_KEY") or None
+def _resolve_keys(api_keys: list[str] | None) -> list[str]:
+    keys: list[str] = list(api_keys or [])
+    if not keys:
+        env_val = os.environ.get("SRG_API_KEYS", "")
+        keys = [k.strip() for k in env_val.split(",") if k.strip()]
+    if not keys:
+        raise SRGError(
+            "api_keys must be provided either as a parameter or "
+            "via the SRG_API_KEYS environment variable (comma-separated)."
+        )
+    return keys
 
 
 def _get_base_url(value: str | None) -> str:
@@ -40,141 +41,200 @@ class SRGClient:
     """
     Synchronous SRG SDK client.
 
+    The client maintains an internal **registry** — a mapping of
+    ``workspace_id → SyncHTTPClient`` — built at construction time by
+    bootstrapping each supplied API key.  Every resource method that
+    talks to the API requires an explicit ``workspace_id`` argument;
+    the client looks up the corresponding HTTP client in the registry
+    and uses it for that call.  This lets a single ``SRGClient``
+    instance serve multiple workspaces concurrently while keeping each
+    request isolated to the correct credentials.
+
+    Keys that cannot be resolved to a workspace (e.g. invalid or
+    revoked keys) are silently skipped.  If *no* key resolves to a
+    workspace the constructor raises :class:`~srg.exceptions.SRGError`.
+
     Parameters
     ----------
-    api_key:
-        Optional default workspace API key (Bearer token). Falls back to
-        ``SRG_API_KEY`` env var. When provided, it becomes the default key
-        used for every request that doesn't have one bound via
-        :meth:`with_api_key` / :meth:`use_api_key`. When omitted, every
-        request must run inside an ``api_key`` binding or it will raise
-        :class:`SRGError`.
+    api_keys:
+        One or more workspace API keys.  Falls back to the
+        ``SRG_API_KEYS`` environment variable (comma-separated list).
     base_url:
-        Base URL for the API gateway. Falls back to ``SRG_BASE_URL`` env var,
-        then defaults to ``https://gateway.srgplus.com``.
+        API gateway base URL.  Falls back to ``SRG_BASE_URL`` env var,
+        then ``https://gateway.srgplus.com``.
     timeout:
         HTTP request timeout in seconds (default 30).
 
     Examples
     --------
-    Eager single-key usage (unchanged) — the workspace is fetched up-front::
+    Single workspace::
 
-        client = SRGClient(api_key="srgplus_...")
-        profiles = client.hub_profiles.list()
+        client = SRGClient(api_keys=["srgplus_..."])
+        profiles = client.hub_profiles.list(workspace_id="ws-uuid-1")
 
-    Per-request key — share one connection pool across many workspaces::
+    Multiple workspaces from environment::
 
-        client = SRGClient()  # no eager bootstrap, no default key
+        # SRG_API_KEYS=srgplus_ws1,srgplus_ws2
+        client = SRGClient()
+        profiles = client.hub_profiles.list(workspace_id="ws-uuid-1")
+        other    = client.hub_profiles.list(workspace_id="ws-uuid-2")
 
-        scoped = client.with_api_key("srgplus_workspace_a")
-        scoped.hub_profiles.list()
+    Inspect registered workspaces::
 
-        with client.use_api_key("srgplus_workspace_b"):
-            client.hub_profiles.list()
+        configured = client.workspaces.list_configured()
     """
 
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_keys: list[str] | None = None,
         base_url: str | None = None,
         timeout: float = 30.0,
     ) -> None:
-        resolved_key = _resolve_api_key(api_key)
-        self._http = SyncHTTPClient(
-            api_key=resolved_key,
-            base_url=_get_base_url(base_url),
-            timeout=timeout,
-        )
-        self._workspace_id: str | None = None
-        # Eager bootstrap preserves backward-compat: when a default key was
-        # provided we fetch workspaces immediately so ``client.workspace_id``
-        # works synchronously, just like the old API.
-        if resolved_key:
-            self._workspace_id = self._bootstrap_workspace()
-
-    def _bootstrap_workspace(self) -> str:
-        raw: list[dict[str, object]] = self._http.get("/api/v1/workspaces") or []
-        if not raw:
-            raise SRGError("No workspaces found for this API key")
-        first = raw[0]
-        return str(first["id"])
+        keys = _resolve_keys(api_keys)
+        base = _get_base_url(base_url)
+        self._registry: dict[str, SyncHTTPClient] = {}
+        for key in keys:
+            http = SyncHTTPClient(api_key=key, base_url=base, timeout=timeout)
+            try:
+                raw: list = http.get("/api/v1/workspaces") or []
+            except AuthenticationError:
+                continue  # invalid key — skip silently
+            if not raw:
+                continue  # key has no accessible workspace — skip silently
+            ws_id = str(raw[0]["id"])
+            self._registry[ws_id] = http
+        if not self._registry:
+            raise SRGError("No workspaces found for any of the provided API keys")
 
     @property
-    def workspace_id(self) -> str:
-        """Workspace id for the current default key.
-
-        Triggers a one-shot ``GET /api/v1/workspaces`` call the first time
-        it's accessed when no eager bootstrap ran. Requires a key to be
-        bound either as a default or via :meth:`use_api_key`.
-        """
-        if self._workspace_id is None:
-            self._workspace_id = self._bootstrap_workspace()
-        return self._workspace_id
-
-    def with_api_key(self, api_key: str) -> "_ScopedSRGClient":
-        """Return a scoped client that binds ``api_key`` for every request.
-
-        The scoped client shares the same underlying ``httpx.Client`` (and
-        therefore the same connection pool) as ``self``. Use this in a
-        long-running server that talks to many workspaces.
-        """
-        return _ScopedSRGClient(self, api_key)
-
-    @contextmanager
-    def use_api_key(self, api_key: str) -> Iterator["SRGClient"]:
-        """Bind ``api_key`` for the duration of the ``with`` block.
-
-        ::
-
-            with client.use_api_key("srgplus_..."):
-                client.hub_profiles.list()
-        """
-        token = _active_api_key.set(api_key)
-        try:
-            yield self
-        finally:
-            _active_api_key.reset(token)
+    def workspace_ids(self) -> list[str]:
+        """Return the list of workspace IDs accessible with the provided API keys."""
+        return list(self._registry)
 
     @cached_property
     def users(self) -> UsersResource:
-        return UsersResource(self._http)
+        """
+        Provides a cached property that returns a `UsersResource` instance. This allows
+        on-demand initialization and caching of the resource, optimizing repeated access.
+
+        :return: An instance of `UsersResource` initialized with the HTTP client.
+        :rtype: UsersResource
+        """
+        return UsersResource(self._registry)
 
     @cached_property
     def invitations(self) -> InvitationsResource:
-        return InvitationsResource(self._http)
+        """
+        Provides a cached property that returns an instance of InvitationsResource.
+
+        This property lazily initializes and caches an instance of
+        InvitationsResource, which utilizes the existing HTTP client instance
+        to perform operations related to invitations.
+
+        :return: A cached instance of InvitationsResource.
+        :rtype: InvitationsResource
+        """
+        return InvitationsResource(self._registry)
 
     @cached_property
     def permissions(self) -> PermissionsResource:
-        return PermissionsResource(self._http)
+        """
+        Provides a cached property that returns a PermissionsResource instance.
+
+        The property caches the computed value after its first access to improve
+        performance and avoid repeated computations.
+
+        :return: An instance of PermissionsResource associated with the current
+            HTTP session.
+        :rtype: PermissionsResource
+        """
+        return PermissionsResource(self._registry)
 
     @cached_property
     def permission_groups(self) -> PermissionGroupsResource:
-        return PermissionGroupsResource(self._http)
+        """
+        Returns a resource object for handling permission groups.
+
+        This property provides access to the PermissionGroupsResource, which facilitates
+        operations related to managing permission groups in the system.
+
+        :return: A PermissionGroupsResource instance initialized with the current HTTP
+            connection.
+        :rtype: PermissionGroupsResource
+        """
+        return PermissionGroupsResource(self._registry)
 
     @cached_property
     def hub_profiles(self) -> HubProfilesResource:
-        return HubProfilesResource(self._http, workspace_id=self._workspace_id)
+        """
+        Provides cached access to the HubProfilesResource associated with the workspace ID.
+
+        This property initializes and returns an instance of HubProfilesResource, ensuring that
+        the resource is created only once and reused on subsequent accesses.
+
+        :return: The HubProfilesResource instance associated with the current workspace ID.
+        :rtype: HubProfilesResource
+        """
+        return HubProfilesResource(self._registry)
 
     @cached_property
     def workspaces(self) -> WorkspacesResource:
-        return WorkspacesResource(self._http, workspace_id=self._workspace_id)
+        """
+        Provides a cached property that initializes and returns a `WorkspacesResource`
+        object. This allows lazy-fetching of the resource and caches the result for
+        subsequent access.
+
+        :return: An instance of `WorkspacesResource` initialized with the `_http`
+            attribute.
+        :rtype: WorkspacesResource
+        """
+        return WorkspacesResource(self._registry)
 
     @cached_property
     def assets(self) -> AssetsResource:
-        return AssetsResource(self._http)
+        """
+        Provides a cached property that initializes and returns an instance of
+        the AssetsResource class. The property ensures that the instance is
+        created only once and is then cached for subsequent accesses.
+
+        :return: An instance of the AssetsResource class initialized with
+            the current HTTP session.
+        :rtype: AssetsResource
+        """
+        return AssetsResource(self._registry)
 
     @cached_property
     def channels(self) -> ChannelsResource:
-        return ChannelsResource(self._http)
+        """
+        A cached property that returns an instance of ChannelsResource. This property
+        is computed on the first access and then cached for subsequent accesses, ensuring
+        efficient and reusable access to the ChannelsResource object.
+
+        :return: An instance of ChannelsResource.
+        :rtype: ChannelsResource
+        """
+        return ChannelsResource(self._registry)
 
     @cached_property
     def contents(self) -> ContentsResource:
-        return ContentsResource(self._http)
+        """
+        Provides access to the ContentsResource, encapsulating its initialization and
+        ensuring it is created only once through caching.
+
+        :cached_property:
+            A decorator that transforms the method into a read-only property, whose
+            value is computed once and then cached for subsequent access.
+
+        :return: A new or cached instance of ``ContentsResource`` associated with the corresponding
+            HTTP client.
+        :rtype: ContentsResource
+        """
+        return ContentsResource(self._registry)
 
     def close(self) -> None:
-        """Close all underlying HTTP connections."""
-        self._http.close()
+        for http in self._registry.values():
+            http.close()
 
     def __enter__(self) -> "SRGClient":
         return self
@@ -183,250 +243,212 @@ class SRGClient:
         self.close()
 
 
-class _ScopedSRGClient:
-    """Lightweight wrapper returned by :meth:`SRGClient.with_api_key`.
-
-    Forwards every public attribute access to the parent client while pinning
-    the Authorization header to the bound api key. Uses the same connection
-    pool and the same resource singletons as the parent — the only thing it
-    overrides is the active key in the per-call ``ContextVar``.
-    """
-
-    def __init__(self, parent: "SRGClient", api_key: str) -> None:
-        self._parent = parent
-        self._api_key = api_key
-
-    def __getattr__(self, name: str) -> object:
-        # Resource access goes through this — wrap each callable so that the
-        # bound key is active for the duration of the call.
-        attr = getattr(self._parent, name)
-        if name.startswith("_"):
-            return attr
-        return _BoundResource(attr, self._api_key)
-
-    def with_api_key(self, api_key: str) -> "_ScopedSRGClient":
-        return _ScopedSRGClient(self._parent, api_key)
-
-    @contextmanager
-    def use_api_key(self, api_key: str) -> Iterator["_ScopedSRGClient"]:
-        token = _active_api_key.set(api_key)
-        try:
-            yield self
-        finally:
-            _active_api_key.reset(token)
-
-
-class _BoundResource:
-    """Proxy that activates the bound api key on every method call."""
-
-    def __init__(self, target: object, api_key: str) -> None:
-        self._target = target
-        self._api_key = api_key
-
-    def __getattr__(self, name: str) -> object:
-        attr = getattr(self._target, name)
-        if not callable(attr):
-            return attr
-
-        api_key = self._api_key
-
-        def wrapper(*args: object, **kwargs: object) -> object:
-            token = _active_api_key.set(api_key)
-            try:
-                return attr(*args, **kwargs)
-            finally:
-                _active_api_key.reset(token)
-
-        return wrapper
-
-
 class AsyncSRGClient:
     """
-    Asynchronous SRG SDK client (identical API to :class:`SRGClient` but all
-    methods are coroutines).
+    Asynchronous SRG SDK client.
 
-    The async client never bootstraps the workspace eagerly: ``workspace_id``
-    is fetched lazily the first time it is awaited via
-    :meth:`get_workspace_id`. This avoids the previous
-    ``AttributeError`` when async users accessed ``client.workspace_id``.
+    Identical API to :class:`SRGClient` but all resource methods are
+    coroutines.  The internal **registry** (``workspace_id →
+    AsyncHTTPClient``) is populated during bootstrap, which happens
+    inside ``__aenter__``.  Always use this client as an async context
+    manager, or call ``await client.bootstrap()`` before accessing
+    resources.
+
+    Keys that cannot be resolved to a workspace (e.g. invalid or
+    revoked keys) are silently skipped.  If *no* key resolves to a
+    workspace, :meth:`bootstrap` raises :class:`~srg.exceptions.SRGError`.
+
+    Parameters
+    ----------
+    api_keys:
+        One or more workspace API keys.  Falls back to the
+        ``SRG_API_KEYS`` environment variable (comma-separated list).
+    base_url:
+        API gateway base URL.  Falls back to ``SRG_BASE_URL`` env var,
+        then ``https://gateway.srgplus.com``.
+    timeout:
+        HTTP request timeout in seconds (default 30).
 
     Examples
     --------
     ::
 
-        async with AsyncSRGClient(api_key="srgplus_...") as client:
-            profiles = await client.hub_profiles.list()
-            ws_id = await client.get_workspace_id()
-
-        # multi-tenant server pattern
-        async with AsyncSRGClient() as client:
-            async with client.use_api_key("srgplus_..."):
-                profiles = await client.hub_profiles.list()
+        async with AsyncSRGClient(api_keys=["srgplus_ws1", "srgplus_ws2"]) as client:
+            profiles = await client.hub_profiles.list(workspace_id="ws-uuid-1")
+            configured = await client.workspaces.list_configured()
     """
 
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_keys: list[str] | None = None,
         base_url: str | None = None,
         timeout: float = 30.0,
     ) -> None:
-        resolved_key = _resolve_api_key(api_key)
-        self._http = AsyncHTTPClient(
-            api_key=resolved_key,
-            base_url=_get_base_url(base_url),
-            timeout=timeout,
-        )
-        self._workspace_id: str | None = None
+        self._raw_keys = _resolve_keys(api_keys)
+        self._base = _get_base_url(base_url)
+        self._timeout = timeout
+        self._registry: dict[str, AsyncHTTPClient] = {}
 
-    async def _bootstrap_workspace(self) -> str:
-        raw: list[dict[str, object]] = (
-            await self._http.get("/api/v1/workspaces") or []
-        )
-        if not raw:
-            raise SRGError("No workspaces found for this API key")
-        first = raw[0]
-        return str(first["id"])
+    async def bootstrap(self) -> None:
+        """Populate the registry by resolving each API key to its workspace.
 
-    async def get_workspace_id(self) -> str:
-        """Return the workspace id, fetching it lazily on first access."""
-        if self._workspace_id is None:
-            self._workspace_id = await self._bootstrap_workspace()
-        return self._workspace_id
+        Idempotent — subsequent calls are no-ops once the registry is built.
+        Keys that return no workspaces are silently skipped.
+        """
+        if self._registry:
+            return
+        for key in self._raw_keys:
+            http = AsyncHTTPClient(
+                api_key=key, base_url=self._base, timeout=self._timeout
+            )
+            try:
+                raw: list = await http.get("/api/v1/workspaces") or []
+            except AuthenticationError:
+                continue  # invalid key — skip silently
+            if not raw:
+                continue
+            ws_id = str(raw[0]["id"])
+            self._registry[ws_id] = http
+        if not self._registry:
+            raise SRGError("No workspaces found for any of the provided API keys")
 
     @property
-    def workspace_id(self) -> str | None:
-        """The cached workspace id, or ``None`` if not yet fetched.
-
-        Use :meth:`get_workspace_id` to trigger the fetch.
-        """
-        return self._workspace_id
-
-    def with_api_key(self, api_key: str) -> "_ScopedAsyncSRGClient":
-        """Return a scoped client that binds ``api_key`` for every request."""
-        return _ScopedAsyncSRGClient(self, api_key)
-
-    @asynccontextmanager
-    async def use_api_key(self, api_key: str) -> AsyncIterator["AsyncSRGClient"]:
-        """Async context manager that binds ``api_key`` for the block."""
-        token = _active_api_key.set(api_key)
-        try:
-            yield self
-        finally:
-            _active_api_key.reset(token)
+    def workspace_ids(self) -> list[str]:
+        """Return the list of workspace IDs accessible with the provided API keys."""
+        return list(self._registry)
 
     @cached_property
     def users(self) -> AsyncUsersResource:
-        return AsyncUsersResource(self._http)
+        """
+        Returns an instance of AsyncUsersResource for accessing user-related resources.
+
+        The method lazily instantiates an AsyncUsersResource object, which interacts
+        with user-related endpoints of the API. Cached on the property level to avoid
+        redundant creation of instances.
+
+        :return: An instance of AsyncUsersResource.
+        :rtype: AsyncUsersResource
+        """
+        return AsyncUsersResource(self._registry)
 
     @cached_property
     def invitations(self) -> AsyncInvitationsResource:
-        return AsyncInvitationsResource(self._http)
+        """
+        Provides a cached property for accessing the asynchronous invitations resource
+        associated with the current object. This property initializes the resource only
+        on demand and caches the result for future access.
+
+        :return: An asynchronous instance of InvitationsResource, providing access
+            to invitations-related operations.
+        """
+        return AsyncInvitationsResource(self._registry)
 
     @cached_property
     def permissions(self) -> AsyncPermissionsResource:
-        return AsyncPermissionsResource(self._http)
+        """
+        Provides access to permissions resource associated with the current instance.
+
+        This method returns an instance of `AsyncPermissionsResource` which allows
+        interaction with permissions data in an asynchronous manner. The returned
+        resource uses the current HTTP session for communication.
+
+        :return: An instance of `AsyncPermissionsResource` configured with the current
+            HTTP session for asynchronous permissions management.
+        :rtype: AsyncPermissionsResource
+        """
+        return AsyncPermissionsResource(self._registry)
 
     @cached_property
     def permission_groups(self) -> AsyncPermissionGroupsResource:
-        return AsyncPermissionGroupsResource(self._http)
+        """
+        Provides a cached property that returns an instance of AsyncPermissionGroupsResource.
+
+        This property initializes and returns an `AsyncPermissionGroupsResource` object
+        using the provided HTTP client. The result is cached to avoid redundant
+        initializations, improving performance for subsequent accesses.
+
+        :return: An instance of AsyncPermissionGroupsResource initialized with the HTTP client.
+        :rtype: AsyncPermissionGroupsResource
+        """
+        return AsyncPermissionGroupsResource(self._registry)
 
     @cached_property
     def hub_profiles(self) -> AsyncHubProfilesResource:
-        return AsyncHubProfilesResource(self._http)
+        """
+        Provides access to hub profile resources in an asynchronous manner.
+
+        This property allows lazy initialization and caching of an
+        `AsyncHubProfilesResource` instance. Subsequent accesses to this property
+        return the cached instance.
+
+        :return: An instance of `AsyncHubProfilesResource` initialized with the
+            current asynchronous HTTP client.
+        :rtype: AsyncHubProfilesResource
+        """
+        return AsyncHubProfilesResource(self._registry)
 
     @cached_property
     def workspaces(self) -> AsyncWorkspacesResource:
-        return AsyncWorkspacesResource(self._http)
+        """
+        Provides a cached property for accessing an instance of AsyncWorkspacesResource.
+
+        The method utilizes the `functools.cached_property` decorator to ensure that the
+        `AsyncWorkspacesResource` instance is created only once and reused on subsequent
+        accesses. This is useful when the initialization of the resource is computationally
+        expensive or requires network requests.
+
+        :return: An instance of AsyncWorkspacesResource associated with the current HTTP
+            client.
+        :rtype: AsyncWorkspacesResource
+        """
+        return AsyncWorkspacesResource(self._registry)
 
     @cached_property
     def assets(self) -> AsyncAssetsResource:
-        return AsyncAssetsResource(self._http)
+        """
+        Provides a cached property that initializes and returns an instance of
+        AsyncAssetsResource. The value is computed only once, and subsequent
+        accesses return the cached result.
+
+        :return: An instance of AsyncAssetsResource.
+        :rtype: AsyncAssetsResource
+        """
+        return AsyncAssetsResource(self._registry)
 
     @cached_property
     def channels(self) -> AsyncChannelsResource:
-        return AsyncChannelsResource(self._http)
+        """
+        Provides a cached property that returns an instance of AsyncChannelsResource.
+
+        :rtype: AsyncChannelsResource
+        :return: An instance of AsyncChannelsResource initialized with the current
+            HTTP client.
+        """
+        return AsyncChannelsResource(self._registry)
 
     @cached_property
     def contents(self) -> AsyncContentsResource:
-        return AsyncContentsResource(self._http)
+        """
+        A cached property that provides access to an `AsyncContentsResource` instance.
+
+        This property lazily initializes the `AsyncContentsResource` object upon first
+        access and caches the result for subsequent accesses, improving efficiency for
+        repeated calls.
+
+        :return: An instance of AsyncContentsResource for handling asynchronous
+                 content-related operations.
+        :rtype: AsyncContentsResource
+        """
+        return AsyncContentsResource(self._registry)
 
     async def aclose(self) -> None:
-        """Close all underlying HTTP connections."""
-        await self._http.aclose()
+        for http in self._registry.values():
+            await http.aclose()
 
     async def __aenter__(self) -> "AsyncSRGClient":
+        await self.bootstrap()
         return self
 
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
-
-
-class _ScopedAsyncSRGClient:
-    """Async counterpart to :class:`_ScopedSRGClient`."""
-
-    def __init__(self, parent: "AsyncSRGClient", api_key: str) -> None:
-        self._parent = parent
-        self._api_key = api_key
-
-    def __getattr__(self, name: str) -> object:
-        attr = getattr(self._parent, name)
-        if name.startswith("_"):
-            return attr
-        return _BoundAsyncResource(attr, self._api_key)
-
-    def with_api_key(self, api_key: str) -> "_ScopedAsyncSRGClient":
-        return _ScopedAsyncSRGClient(self._parent, api_key)
-
-    @asynccontextmanager
-    async def use_api_key(
-        self, api_key: str
-    ) -> AsyncIterator["_ScopedAsyncSRGClient"]:
-        token = _active_api_key.set(api_key)
-        try:
-            yield self
-        finally:
-            _active_api_key.reset(token)
-
-    async def __aenter__(self) -> "_ScopedAsyncSRGClient":
-        return self
-
-    async def __aexit__(self, *_: object) -> None:
-        await self._parent.aclose()
-
-
-class _BoundAsyncResource:
-    """Proxy that activates the bound api key for sync- and async-method calls."""
-
-    def __init__(self, target: object, api_key: str) -> None:
-        self._target = target
-        self._api_key = api_key
-
-    def __getattr__(self, name: str) -> object:
-        attr = getattr(self._target, name)
-        if not callable(attr):
-            return attr
-
-        api_key = self._api_key
-
-        async def async_wrapper(*args: object, **kwargs: object) -> object:
-            token = _active_api_key.set(api_key)
-            try:
-                return await attr(*args, **kwargs)
-            finally:
-                _active_api_key.reset(token)
-
-        def sync_wrapper(*args: object, **kwargs: object) -> object:
-            token = _active_api_key.set(api_key)
-            try:
-                return attr(*args, **kwargs)
-            finally:
-                _active_api_key.reset(token)
-
-        # Best-effort detection: async resource methods are coroutine
-        # functions, sync helpers (e.g. pagination iterators) are not.
-        import inspect
-
-        if inspect.iscoroutinefunction(attr):
-            return async_wrapper
-        return sync_wrapper
