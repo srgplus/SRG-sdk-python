@@ -15,7 +15,6 @@ Every resource that accepts images supports two modes:
 """
 
 from srg import SRGClient
-from srg.schemas.asset import MediaAssetCreate
 from srg.schemas.common import (
     ContentFileUploadParameters,
     FileUploadParameters,
@@ -147,14 +146,11 @@ if upd_result.cover_signed_url:
 # Asset — cover image (thumbnail)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- Create a media asset first ---
-media = client.assets.create(
+# --- Upload a video asset first (registers + uploads in one call) ---
+media = client.assets.upload(
     hub_profile_id=HUB_PROFILE_ID,
-    asset=MediaAssetCreate(
-        name="Product Demo",
-        duration_in_seconds=300.0,
-        memory_size_in_bytes=157_286_400,
-    ),
+    file="/path/to/product_demo.mp4",
+    name="Product Demo",
 )
 
 # --- Update asset with cover (auto-upload from file) ---

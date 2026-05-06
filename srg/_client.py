@@ -290,6 +290,19 @@ class AsyncSRGClient:
         self._timeout = timeout
         self._registry: dict[str, AsyncHTTPClient] = {}
 
+    # OOLD VERSION FROM ASSETS FIX
+    #     async def _bootstrap_workspace(self) -> str:
+    #         raw: list[dict[str, object]] = await self._http.get("/api/v1/workspaces") or []
+    #         if not raw:
+    #             raise SRGError("No workspaces found for this API key")
+    #         first = raw[0]
+    #         return str(first["id"])
+    #
+    #     async def get_workspace_id(self) -> str:
+    #         """Return the workspace id, fetching it lazily on first access."""
+    #         if self._workspace_id is None:
+    #             self._workspace_id = await self._bootstrap_workspace()
+    #         return self._workspace_id
     async def bootstrap(self) -> None:
         """Populate the registry by resolving each API key to its workspace.
 

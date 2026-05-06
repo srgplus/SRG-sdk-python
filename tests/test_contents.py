@@ -120,7 +120,7 @@ class TestContentsSections:
         mock_http.post.return_value = {"id": "section-uuid-1"}
         resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.create_section(
+        result = resource.create_section(
             CONTENT_ID, "assets", name="Intro", workspace_id="workspace-uuid-1"
         )
 
@@ -128,6 +128,7 @@ class TestContentsSections:
             f"/api/v1/contents/{CONTENT_ID}/assets/sections",
             json={"name": "Intro"},
         )
+        assert result.id == "section-uuid-1"
 
     def test_update_section_typed_params(self, mock_http: Mock) -> None:
         mock_http.put.return_value = None
@@ -555,7 +556,7 @@ class TestAsyncContentsCreate:
         async_mock_http.post.return_value = {"id": "section-uuid-1"}
         resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.create_section(
+        result = await resource.create_section(
             CONTENT_ID, "assets", name="Intro", workspace_id="workspace-uuid-1"
         )
 
@@ -563,6 +564,7 @@ class TestAsyncContentsCreate:
             f"/api/v1/contents/{CONTENT_ID}/assets/sections",
             json={"name": "Intro"},
         )
+        assert result.id == "section-uuid-1"
 
 
 class TestAsyncContentsFilterAll:
