@@ -12,6 +12,7 @@ from srg.exceptions import (
 )
 from srg.schemas import (
     # workspace
+    AbortUploadRequest,
     Action,
     # hub_profile
     ActionButtonLogicUpsert,
@@ -25,6 +26,7 @@ from srg.schemas import (
     # common
     AssetCover,
     AssetSearch,
+    AssetUploadInit,
     AssetUploadSignedUrl,
     AvailabilityLevel,
     Category,
@@ -41,6 +43,7 @@ from srg.schemas import (
     CollectionProgression,
     # content v1
     CollectionProgressionStats,
+    CompleteUploadRequest,
     Content,
     ContentChannelUpsert,
     ContentCover,
@@ -202,6 +205,9 @@ __all__ = [
     "parse_asset_response",
     "AssetSearch",
     "AssetUploadSignedUrl",
+    "AssetUploadInit",
+    "CompleteUploadRequest",
+    "AbortUploadRequest",
     "MediaAssetCreate",
     "EmbedAssetCreate",
     "FileAssetCreate",

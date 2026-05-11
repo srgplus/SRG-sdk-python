@@ -1,12 +1,34 @@
+import warnings
 from typing import Any, Union
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from srg.schemas.common import (
     AssetCover,
     SignedUrl,
     SRGModel,
 )
+
+
+class _AssetCreateBase(SRGModel):
+    """Shared bits for asset-create payloads.
+
+    Accepts the legacy ``dollar_type=`` kwarg with a DeprecationWarning so
+    older callers keep working; new code should pass ``type=`` (or rely on
+    the per-subclass default).
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_dollar_type(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "dollar_type" in data:
+            warnings.warn(
+                "`dollar_type` is deprecated; use `type` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            data.setdefault("$type", data.pop("dollar_type"))
+        return data
 
 
 class Asset(SRGModel):
@@ -94,52 +116,58 @@ class AssetUploadSignedUrl(SRGModel):
     metadata_headers: dict[str, str] | None = None
 
 
-class MediaAssetCreate(SRGModel):
+class MediaAssetCreate(_AssetCreateBase):
     """$type == 'Media'"""
 
-    dollar_type: str = Field("Media", alias="$type")
+    type: str = Field("Media", alias="$type")
     name: str
+    extension: str | None = None
     duration_in_seconds: float | None = None
     memory_size_in_bytes: int | None = None
+    upload_part_size_in_bytes: int | None = None
 
 
-class EmbedAssetCreate(SRGModel):
+class EmbedAssetCreate(_AssetCreateBase):
     """$type == 'Embed'"""
 
-    dollar_type: str = Field("Embed", alias="$type")
+    type: str = Field("Embed", alias="$type")
     name: str
     url: str
     duration_in_seconds: float | None = None
 
 
-class FileAssetCreate(SRGModel):
+class FileAssetCreate(_AssetCreateBase):
     """$type == 'File'"""
 
-    dollar_type: str = Field("File", alias="$type")
+    type: str = Field("File", alias="$type")
     name: str
     extension: str
     memory_size_in_bytes: int
+    upload_part_size_in_bytes: int | None = None
     read_only: bool = False
 
 
-class ImageAssetCreate(SRGModel):
+class ImageAssetCreate(_AssetCreateBase):
     """$type == 'Image'"""
 
-    dollar_type: str = Field("Image", alias="$type")
+    type: str = Field("Image", alias="$type")
     name: str
     extension: str
     width: float
     height: float
     memory_size_in_bytes: int
+    upload_part_size_in_bytes: int | None = None
 
 
-class VideoAssetCreate(SRGModel):
+class VideoAssetCreate(_AssetCreateBase):
     """$type == 'Video'"""
 
-    dollar_type: str = Field("Video", alias="$type")
+    type: str = Field("Video", alias="$type")
     name: str
     extension: str
     memory_size_in_bytes: int
+    media_type: int | None = None
+    upload_part_size_in_bytes: int | None = None
 
 
 AnyAssetCreate = Union[
@@ -149,3 +177,38 @@ AnyAssetCreate = Union[
     ImageAssetCreate,
     VideoAssetCreate,
 ]
+
+
+class AssetUploadInit(SRGModel):
+    """Response from ``POST /api/v1/assets/batch``.
+
+    Contains the asset id (``id``), the storage-side multipart upload id
+    (``upload_id``), and the list of presigned PUT URLs — one per part.
+    """
+
+    id: str
+    upload_id: str
+    urls: list[str]
+    type: str = Field(alias="$type")
+
+
+class _CompleteUploadPartTag(SRGModel):
+    """Single part tag for ``POST /api/v1/files/upload/complete``."""
+
+    part_number: str
+    e_tag: str = Field(alias="eTag")
+
+
+class CompleteUploadRequest(SRGModel):
+    """Payload for ``POST /api/v1/files/upload/complete``."""
+
+    node_id: str
+    upload_id: str
+    part_tags: list[_CompleteUploadPartTag]
+
+
+class AbortUploadRequest(SRGModel):
+    """Payload for ``POST /api/v1/files/upload/abort``."""
+
+    node_id: str
+    upload_id: str

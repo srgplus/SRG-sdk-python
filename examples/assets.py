@@ -1,42 +1,101 @@
 # flake8: noqa: T201
 """
-Assets — create / update / search / filter examples.
+Assets — upload / read / search / filter / update examples.
 
-Asset types:
-  MediaAssetCreate   — video processed via transcoding pipeline
-  EmbedAssetCreate   — external embed (YouTube, Vimeo, …)
-  FileAssetCreate    — arbitrary file (PDF, ZIP, …)
-  ImageAssetCreate   — image file
-  VideoAssetCreate   — raw video file (no transcoding)
+Recommended API:
+  upload()        — create + upload a single file in one call.
+  upload_batch()  — create + upload multiple files in a single batched flow.
+
+Both auto-detect the asset kind from the file extension:
+  • Image  — png, jpg, jpeg, gif, bmp, webp, heic, svg
+  • Video  — mp4, mov, mkv, webm, avi, …
+  • File   — anything else (pdf, zip, txt, …)
+
+For images the SDK reads width/height directly from the file header (PNG,
+JPEG, GIF, BMP, WEBP) — no extra dependency. Pillow is used as a fallback
+for HEIC and other formats; you can also pass ``width=``/``height=``
+explicitly.
+
+Embeds (YouTube, Vimeo, …) and the legacy "Media" type still go through
+:meth:`AssetsResource.create`, which is kept for that use case.
 """
 
 from srg import SRGClient
-from srg.schemas.asset import (
-    EmbedAssetCreate,
-    FileAssetCreate,
-    ImageAssetCreate,
-    MediaAssetCreate,
-    VideoAssetCreate,
-)
+from srg.resources.assets import AssetUploadInput
+from srg.schemas.asset import EmbedAssetCreate
 
 client = SRGClient(api_key="SRG_API_KEY")
 
 HUB_PROFILE_ID = "your-hub-profile-id"
 
-# ── Create (single) ───────────────────────────────────────────────────────────
+# ── Upload (single) ───────────────────────────────────────────────────────────
 
-# --- Media (video, transcoding pipeline) ---
-media = client.assets.create(
+# --- Image — kind, width, and height auto-detected from the file header ---
+image = client.assets.upload(
     hub_profile_id=HUB_PROFILE_ID,
-    asset=MediaAssetCreate(
-        name="Intro Video",
-        duration_in_seconds=120.0,
-        memory_size_in_bytes=52_428_800,
-    ),
+    file="/path/to/banner.png",
 )
-print("Created media:", media.id, getattr(media, "status", None))
+print("Uploaded image:", image.id, image.name)
 
-# --- Embed (YouTube / Vimeo / …) ---
+# --- Video (raw upload, no transcoding pipeline) ---
+video = client.assets.upload(
+    hub_profile_id=HUB_PROFILE_ID,
+    file="/path/to/clip.mp4",
+    name="Launch Teaser",
+)
+print("Uploaded video:", video.id, video.name)
+
+# --- Arbitrary file (PDF, ZIP, TXT, …) ---
+doc = client.assets.upload(
+    hub_profile_id=HUB_PROFILE_ID,
+    file="/path/to/handbook.pdf",
+    name="Employee Handbook",
+)
+print("Uploaded file:", doc.id, doc.name)
+
+# --- Image with explicit width/height (e.g. for HEIC without Pillow) ---
+heic = client.assets.upload(
+    hub_profile_id=HUB_PROFILE_ID,
+    file="/path/to/photo.heic",
+    width=4032,
+    height=3024,
+)
+print("Uploaded HEIC:", heic.id)
+
+
+# --- Track upload progress (large files / multipart) ---
+def show_progress(uploaded: int, total: int) -> None:
+    print(f"  {uploaded / total:.0%}  ({uploaded}/{total} bytes)")
+
+
+big = client.assets.upload(
+    hub_profile_id=HUB_PROFILE_ID,
+    file="/path/to/large_video.mp4",
+    name="Conference Recording",
+    on_progress=show_progress,
+)
+print("Uploaded big video:", big.id)
+
+# ── Upload (batch) ────────────────────────────────────────────────────────────
+
+# Mixed types in a single batched call. Progress is aggregated across the
+# whole batch.
+assets = client.assets.upload_batch(
+    hub_profile_id=HUB_PROFILE_ID,
+    files=[
+        AssetUploadInput(file="/path/to/banner.png"),
+        AssetUploadInput(file="/path/to/clip.mp4", name="Teaser"),
+        AssetUploadInput(file="/path/to/handbook.pdf"),
+    ],
+    on_progress=show_progress,
+)
+for a in assets:
+    print("Batch uploaded:", type(a).__name__, a.id, a.name)
+
+# ── Embeds (YouTube / Vimeo / …) ──────────────────────────────────────────────
+
+# Embeds don't have a file payload, so they still use the simple create()
+# call (no upload step required).
 embed = client.assets.create(
     hub_profile_id=HUB_PROFILE_ID,
     asset=EmbedAssetCreate(
@@ -46,96 +105,42 @@ embed = client.assets.create(
 )
 print("Created embed:", embed.id)
 
-# --- File (PDF, ZIP, …) ---
-file_asset = client.assets.create(
-    hub_profile_id=HUB_PROFILE_ID,
-    asset=FileAssetCreate(
-        name="Employee Handbook",
-        extension="pdf",
-        memory_size_in_bytes=204_800,
-    ),
-)
-print("Created file:", file_asset.id)
-
-# --- Image ---
-image = client.assets.create(
-    hub_profile_id=HUB_PROFILE_ID,
-    asset=ImageAssetCreate(
-        name="Welcome Banner",
-        extension="png",
-        width=1920.0,
-        height=1080.0,
-        memory_size_in_bytes=512_000,
-    ),
-)
-print("Created image:", image.id)
-
-# --- Raw video (no transcoding) ---
-video = client.assets.create(
-    hub_profile_id=HUB_PROFILE_ID,
-    asset=VideoAssetCreate(
-        name="Raw Recording",
-        extension="mp4",
-        memory_size_in_bytes=104_857_600,
-    ),
-)
-print("Created video:", video.id)
-
-# ── Create (batch) ────────────────────────────────────────────────────────────
-
-assets = client.assets.create_batch(
-    hub_profile_id=HUB_PROFILE_ID,
-    assets=[
-        FileAssetCreate(
-            name="Handbook v2.pdf", extension="pdf", memory_size_in_bytes=210_000
-        ),
-        ImageAssetCreate(
-            name="Logo",
-            extension="png",
-            width=400.0,
-            height=400.0,
-            memory_size_in_bytes=48_000,
-        ),
-    ],
-)
-for a in assets:
-    print("Batch created:", a.id, a.name)
-
 # ── Read ──────────────────────────────────────────────────────────────────────
 
-asset = client.assets.get(media.id)
+# --- Get one asset by id ---
+asset = client.assets.get(image.id)
 print("Get:", asset.id, asset.name)
 
 # --- Filter — single page (manual cursor control) ---
-page = client.assets.filter(HUB_PROFILE_ID, page_size=20, types=["Media"])
+page = client.assets.filter(HUB_PROFILE_ID, page_size=20, types=["Image"])
 for a in page.items:
     print("Filter:", a.name, a.type)
 
 if page.cursor:
     page2 = client.assets.filter(HUB_PROFILE_ID, page_size=20, cursor=page.cursor)
 
-# --- Filter — iterate all pages automatically ---
-for a in client.assets.filter_all(HUB_PROFILE_ID, types=["Media"]):
+# --- Filter — iterate every page automatically ---
+for a in client.assets.filter_all(HUB_PROFILE_ID, types=["Image", "Video"]):
     print("All:", a.name, a.type)
 
-# --- Search — returns all results in a single request ---
-for a in client.assets.search_all(HUB_PROFILE_ID, search="intro", types=["Media"]):
-    print("Search:", a.name, a.status)
+# --- Search — name/keyword match across the hub profile ---
+for a in client.assets.search_all(HUB_PROFILE_ID, search="banner"):
+    print("Search:", a.name, a.type)
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
 # --- Rename only ---
-updated = client.assets.update(media.id, name="Intro Video (Final)")
-print("Updated:", updated.id)
+updated = client.assets.update(image.id, name="Banner (Final)")
+print("Renamed:", updated.id)
 
-# --- Rename + update cover (auto-upload) ---
+# --- Rename + replace cover (auto-upload from local path or URL) ---
 updated = client.assets.update(
-    media.id,
-    name="Intro Video (Final)",
+    video.id,
+    name="Launch Teaser",
     cover_image="/path/to/thumbnail.jpg",
 )
 print("Updated with cover:", getattr(updated, "cover", None))
 
 # --- Mark as read-only ---
-updated = client.assets.update(file_asset.id, name="Employee Handbook", read_only=True)
+updated = client.assets.update(doc.id, name="Employee Handbook", read_only=True)
 print("Marked read-only:", updated.id)
