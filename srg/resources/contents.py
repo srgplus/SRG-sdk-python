@@ -385,6 +385,11 @@ class ContentsResource:
         """
         existing = self.get_v2(content_id, workspace_id=workspace_id)
 
+        # The PUT route requires the owning hub profile. Fall back to the
+        # content's own hub profile when the caller didn't pass one, so an
+        # update never fails with a bare 400 just for omitting it.
+        hub_profile_id = hub_profile_id or existing.hub_profile_id
+
         _name = name if name is not None else existing.name
         _privacy = privacy if privacy is not None else existing.privacy
         _details = details if details is not None else existing.details
@@ -1566,6 +1571,10 @@ class AsyncContentsResource:
         ```
         """
         existing = await self.get_v2(content_id, workspace_id=workspace_id)
+
+        # PUT route requires the owning hub profile; fall back to the content's
+        # own when the caller omitted it (see sync update for rationale).
+        hub_profile_id = hub_profile_id or existing.hub_profile_id
 
         _name = name if name is not None else existing.name
         _privacy = privacy if privacy is not None else existing.privacy

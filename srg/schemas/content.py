@@ -37,13 +37,17 @@ class ContentWidgetCreate(SRGModel):
 
 class CustomLinkCreate(SRGModel):
     dollar_type: str = Field("CustomLink", alias="$type")
-    label: str
+    # Backend LinkBaseCreate requires `title` + `url` on BOTH link kinds
+    # (NOT `label`/`type`). title is 1-100 chars and unique within a LinkList.
+    # `extension` (optional) is a CustomLink-only image extension.
+    title: str
     url: str
+    extension: str | None = None
 
 
 class KnownLinkCreate(SRGModel):
     dollar_type: str = Field("KnownLink", alias="$type")
-    type: str  # e.g. "Instagram", "Twitter"
+    title: str
     url: str
 
 
