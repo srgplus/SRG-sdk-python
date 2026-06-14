@@ -94,6 +94,7 @@ class SRGClient:
         keys = _resolve_keys(api_keys)
         base = _get_base_url(base_url)
         self._registry: dict[str, SyncHTTPClient] = {}
+        self._overview: dict[str, dict] = {}
         for key in keys:
             http = SyncHTTPClient(api_key=key, base_url=base, timeout=timeout)
             try:
@@ -107,7 +108,11 @@ class SRGClient:
             # setdefault keeps the first key that claims a workspace when the
             # provided keys overlap (deterministic by input order).
             for ws in raw:
-                self._registry.setdefault(str(ws["id"]), http)
+                ws_id = str(ws["id"])
+                self._registry.setdefault(ws_id, http)
+                # Keep the slim dict from this ONE bulk call so list-style
+                # callers don't N+1 a full GET per workspace.
+                self._overview.setdefault(ws_id, ws)
         if not self._registry:
             raise SRGError("No workspaces found for any of the provided API keys")
 
@@ -115,6 +120,18 @@ class SRGClient:
     def workspace_ids(self) -> list[str]:
         """Return the list of workspace IDs accessible with the provided API keys."""
         return list(self._registry)
+
+    @property
+    def workspaces_overview(self) -> list[dict]:
+        """Slim workspace dicts captured during bootstrap's bulk call.
+
+        These come from the single ``GET /api/v1/workspaces`` issued per key
+        while resolving access, so reading them is free (no extra HTTP). Each
+        item is the raw API shape (id, name, hubProfiles, ...). Prefer this
+        over ``workspaces.get(id)`` per workspace when you only need to
+        list/navigate, which otherwise fires one full request per workspace.
+        """
+        return list(self._overview.values())
 
     @cached_property
     def users(self) -> UsersResource:
@@ -295,6 +312,7 @@ class AsyncSRGClient:
         self._base = _get_base_url(base_url)
         self._timeout = timeout
         self._registry: dict[str, AsyncHTTPClient] = {}
+        self._overview: dict[str, dict] = {}
 
     # OOLD VERSION FROM ASSETS FIX
     #     async def _bootstrap_workspace(self) -> str:
@@ -330,7 +348,10 @@ class AsyncSRGClient:
             # Register EVERY workspace a key resolves to (a user-level key maps
             # to many). setdefault keeps the first key that claims a workspace.
             for ws in raw:
-                self._registry.setdefault(str(ws["id"]), http)
+                ws_id = str(ws["id"])
+                self._registry.setdefault(ws_id, http)
+                # Cache the slim dict from this bulk call (free; see sync).
+                self._overview.setdefault(ws_id, ws)
         if not self._registry:
             raise SRGError("No workspaces found for any of the provided API keys")
 
@@ -338,6 +359,16 @@ class AsyncSRGClient:
     def workspace_ids(self) -> list[str]:
         """Return the list of workspace IDs accessible with the provided API keys."""
         return list(self._registry)
+
+    @property
+    def workspaces_overview(self) -> list[dict]:
+        """Slim workspace dicts captured during ``bootstrap`` (no extra HTTP).
+
+        Each item is the raw API shape (id, name, hubProfiles, ...). Prefer
+        this over ``workspaces.get(id)`` per workspace for list/navigate.
+        Empty until ``bootstrap`` has run.
+        """
+        return list(self._overview.values())
 
     @cached_property
     def users(self) -> AsyncUsersResource:
