@@ -453,6 +453,18 @@ class ContentsResource:
             )
         return result
 
+    def archive(self, content_id: str, *, workspace_id: str) -> None:
+        """Archive a content item. Reversible — see :meth:`restore`.
+
+        Archiving hides the content from listings; the platform has no hard
+        delete for content. Requires ManageArchivation on the owning hub.
+        """
+        self._get_http(workspace_id).post(f"/api/v1/contents/{content_id}/archive")
+
+    def restore(self, content_id: str, *, workspace_id: str) -> None:
+        """Restore a previously archived content item."""
+        self._get_http(workspace_id).post(f"/api/v1/contents/{content_id}/restore")
+
     def filter(
         self,
         hub_profile_id: str,
@@ -1639,6 +1651,18 @@ class AsyncContentsResource:
                 content_id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
             )
         return result
+
+    async def archive(self, content_id: str, *, workspace_id: str) -> None:
+        """Archive a content item (reversible — see :meth:`restore`)."""
+        await self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/archive"
+        )
+
+    async def restore(self, content_id: str, *, workspace_id: str) -> None:
+        """Restore a previously archived content item."""
+        await self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/restore"
+        )
 
     async def filter(
         self,

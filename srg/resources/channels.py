@@ -320,6 +320,12 @@ class ChannelsResource:
             f"/api/v1/channels/{channel_id}/archive"
         )
 
+    def restore(self, channel_id: str, *, workspace_id: str) -> dict | None:
+        """Restore a previously archived channel."""
+        return self._get_http(workspace_id).post(
+            f"/api/v1/channels/{channel_id}/restore"
+        )
+
     def delete(self, channel_id: str, *, workspace_id: str) -> None:
         """
         Permanently delete a channel.
@@ -489,6 +495,14 @@ class ChannelsResource:
         """
         return self._get_http(workspace_id).post(
             f"/api/v1/channels/{channel_id}/{category_id}/archive"
+        )
+
+    def restore_category(
+        self, channel_id: str, category_id: str, *, workspace_id: str
+    ) -> dict | None:
+        """Restore a previously archived category."""
+        return self._get_http(workspace_id).post(
+            f"/api/v1/channels/{channel_id}/{category_id}/restore"
         )
 
     def delete_category(
@@ -1203,6 +1217,12 @@ class AsyncChannelsResource:
             f"/api/v1/channels/{channel_id}/archive"
         )
 
+    async def restore(self, channel_id: str, *, workspace_id: str) -> dict | None:
+        """Restore a previously archived channel."""
+        return await self._get_http(workspace_id).post(
+            f"/api/v1/channels/{channel_id}/restore"
+        )
+
     async def delete(self, channel_id: str, *, workspace_id: str) -> None:
         """
         Permanently delete a channel.
@@ -1360,6 +1380,14 @@ class AsyncChannelsResource:
         """
         return await self._get_http(workspace_id).post(
             f"/api/v1/channels/{channel_id}/{category_id}/archive"
+        )
+
+    async def restore_category(
+        self, channel_id: str, category_id: str, *, workspace_id: str
+    ) -> dict | None:
+        """Restore a previously archived category."""
+        return await self._get_http(workspace_id).post(
+            f"/api/v1/channels/{channel_id}/{category_id}/restore"
         )
 
     async def delete_category(
