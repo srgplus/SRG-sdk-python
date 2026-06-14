@@ -59,9 +59,20 @@ class ServerError(APIStatusError):
 
 def _extract_detail(body: object) -> str:
     if isinstance(body, dict):
-        if "detail" in body:
+        if body.get("detail"):
             return f": {body['detail']}"
-        if "title" in body:
+        # ASP.NET ProblemDetails / FluentValidation put per-field messages in
+        # `errors` ({field: [msgs]}). Surface them so a caller (e.g. an agent
+        # writing widgets) sees WHICH field was rejected instead of a bare 400
+        # and having to bisect. Fall back to the generic `title` otherwise.
+        errors = body.get("errors")
+        if isinstance(errors, dict) and errors:
+            parts = []
+            for field, msgs in errors.items():
+                text = "; ".join(str(m) for m in msgs) if isinstance(msgs, list) else str(msgs)
+                parts.append(f"{field}: {text}" if field else text)
+            return ": " + " | ".join(parts)
+        if body.get("title"):
             return f": {body['title']}"
     if isinstance(body, str) and body:
         return f": {body}"

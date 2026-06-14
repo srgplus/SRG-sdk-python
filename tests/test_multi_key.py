@@ -133,6 +133,25 @@ class TestSyncMultiKey:
         )
         client.close()
 
+    @respx.mock
+    def test_workspaces_overview_is_free_and_slim(self) -> None:
+        """workspaces_overview returns the bulk-call dicts (id+name) with NO
+        per-workspace GET. The old list path did one full GET per workspace
+        (N+1), which overflowed the connector on large accounts."""
+        route = respx.get(f"{_BASE_URL}/api/v1/workspaces").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": w, "name": f"WS {w}"} for w in _USER_WS]
+            )
+        )
+        # NB: no /api/v1/workspaces/{id} route is mocked — if the client tried
+        # a per-workspace GET, respx would raise on the unmocked request.
+        client = SRGClient(api_keys=[_USER_KEY], base_url=_BASE_URL)
+        overview = client.workspaces_overview
+        assert {o["id"] for o in overview} == set(_USER_WS)
+        assert {o["name"] for o in overview} == {f"WS {w}" for w in _USER_WS}
+        assert route.call_count == 1  # one bulk call, no fan-out, no re-fetch
+        client.close()
+
 
 class TestAsyncMultiKey:
     @respx.mock
@@ -183,6 +202,21 @@ class TestAsyncMultiKey:
         ) as client:
             assert set(client._registry.keys()) == set(_USER_WS)
             assert len(set(client._registry.values())) == 1
+
+    @respx.mock
+    async def test_workspaces_overview_async(self) -> None:
+        """Async overview carries the slim bulk dicts after bootstrap."""
+        respx.get(f"{_BASE_URL}/api/v1/workspaces").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": w, "name": f"WS {w}"} for w in _USER_WS]
+            )
+        )
+        async with AsyncSRGClient(
+            api_keys=[_USER_KEY], base_url=_BASE_URL
+        ) as client:
+            overview = client.workspaces_overview
+            assert {o["id"] for o in overview} == set(_USER_WS)
+            assert {o["name"] for o in overview} == {f"WS {w}" for w in _USER_WS}
 
     @respx.mock
     async def test_manual_bootstrap(self) -> None:
