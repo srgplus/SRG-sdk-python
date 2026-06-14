@@ -99,11 +99,15 @@ class SRGClient:
             try:
                 raw: list = http.get("/api/v1/workspaces") or []
             except AuthenticationError:
-                continue  # invalid key — skip silently
+                continue  # invalid key, skip silently
             if not raw:
-                continue  # key has no accessible workspace — skip silently
-            ws_id = str(raw[0]["id"])
-            self._registry[ws_id] = http
+                continue  # key has no accessible workspace, skip silently
+            # A user-level key (srgplus_u_) resolves to MANY workspaces, so
+            # register EVERY workspace the key returns, not just the first.
+            # setdefault keeps the first key that claims a workspace when the
+            # provided keys overlap (deterministic by input order).
+            for ws in raw:
+                self._registry.setdefault(str(ws["id"]), http)
         if not self._registry:
             raise SRGError("No workspaces found for any of the provided API keys")
 
@@ -233,7 +237,9 @@ class SRGClient:
         return ContentsResource(self._registry)
 
     def close(self) -> None:
-        for http in self._registry.values():
+        # Dedupe: one HTTP client may be registered under many workspace ids
+        # (a user-level key), so close each distinct client only once.
+        for http in set(self._registry.values()):
             http.close()
 
     def __enter__(self) -> "SRGClient":
@@ -318,11 +324,13 @@ class AsyncSRGClient:
             try:
                 raw: list = await http.get("/api/v1/workspaces") or []
             except AuthenticationError:
-                continue  # invalid key — skip silently
+                continue  # invalid key, skip silently
             if not raw:
                 continue
-            ws_id = str(raw[0]["id"])
-            self._registry[ws_id] = http
+            # Register EVERY workspace a key resolves to (a user-level key maps
+            # to many). setdefault keeps the first key that claims a workspace.
+            for ws in raw:
+                self._registry.setdefault(str(ws["id"]), http)
         if not self._registry:
             raise SRGError("No workspaces found for any of the provided API keys")
 
@@ -456,7 +464,8 @@ class AsyncSRGClient:
         return AsyncContentsResource(self._registry)
 
     async def aclose(self) -> None:
-        for http in self._registry.values():
+        # Dedupe distinct clients (one key, many workspace ids); see close().
+        for http in set(self._registry.values()):
             await http.aclose()
 
     async def __aenter__(self) -> "AsyncSRGClient":
