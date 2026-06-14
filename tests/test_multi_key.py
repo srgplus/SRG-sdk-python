@@ -14,6 +14,10 @@ _WS_2 = "ws-uuid-2"
 _KEY_1 = "srgplus_key_1"
 _KEY_2 = "srgplus_key_2"
 
+# A user-level key (srgplus_u_) resolves to MANY workspaces with one key.
+_USER_KEY = "srgplus_u_userlevelkey"
+_USER_WS = ["ws-user-a", "ws-user-b", "ws-user-c"]
+
 
 def _mock_workspaces(keys_to_ws: dict[str, str]) -> None:
     """Register /api/v1/workspaces mock that returns correct ws per key."""
@@ -89,9 +93,44 @@ class TestSyncMultiKey:
     @respx.mock
     def test_invalid_key_skipped_if_another_valid(self) -> None:
         """Keys that return no workspace are silently skipped."""
-        _mock_workspaces({_KEY_1: _WS_1})  # _KEY_2 returns 401 → no workspace
+        _mock_workspaces({_KEY_1: _WS_1})  # _KEY_2 returns 401, no workspace
         client = SRGClient(api_keys=[_KEY_1, _KEY_2], base_url=_BASE_URL)
         assert set(client._registry.keys()) == {_WS_1}
+        client.close()
+
+    @respx.mock
+    def test_user_level_key_registers_all_workspaces(self) -> None:
+        """ONE user-level key returning many workspaces registers them ALL.
+
+        Regression: the client used to keep only raw[0], so a srgplus_u_ key
+        with N workspaces exposed just the first one (the connector showed a
+        single workspace and could not reach any of the others).
+        """
+        respx.get(f"{_BASE_URL}/api/v1/workspaces").mock(
+            return_value=httpx.Response(200, json=[{"id": w} for w in _USER_WS])
+        )
+        client = SRGClient(api_keys=[_USER_KEY], base_url=_BASE_URL)
+        assert set(client._registry.keys()) == set(_USER_WS)
+        # all workspaces share the single user-key HTTP client
+        assert len(set(client._registry.values())) == 1
+        client.close()
+
+    @respx.mock
+    def test_user_level_key_routes_to_non_first_workspace(self) -> None:
+        """Targeting a workspace that is NOT raw[0] must work (pre-fix it
+        raised 'No API key registered for workspace ...')."""
+        respx.get(f"{_BASE_URL}/api/v1/workspaces").mock(
+            return_value=httpx.Response(200, json=[{"id": w} for w in _USER_WS])
+        )
+        respx.get(
+            f"{_BASE_URL}/api/v1/workspaces/{_USER_WS[2]}/hub-profiles"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        client = SRGClient(api_keys=[_USER_KEY], base_url=_BASE_URL)
+        client.hub_profiles.list(workspace_id=_USER_WS[2])
+        assert (
+            respx.calls.last.request.headers["Authorization"]
+            == f"Bearer {_USER_KEY}"
+        )
         client.close()
 
 
@@ -132,6 +171,18 @@ class TestAsyncMultiKey:
             assert (
                 respx.calls.last.request.headers["Authorization"] == f"Bearer {_KEY_2}"
             )
+
+    @respx.mock
+    async def test_user_level_key_registers_all_workspaces(self) -> None:
+        """ONE user-level key returning many workspaces registers them ALL."""
+        respx.get(f"{_BASE_URL}/api/v1/workspaces").mock(
+            return_value=httpx.Response(200, json=[{"id": w} for w in _USER_WS])
+        )
+        async with AsyncSRGClient(
+            api_keys=[_USER_KEY], base_url=_BASE_URL
+        ) as client:
+            assert set(client._registry.keys()) == set(_USER_WS)
+            assert len(set(client._registry.values())) == 1
 
     @respx.mock
     async def test_manual_bootstrap(self) -> None:
