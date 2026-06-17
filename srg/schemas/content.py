@@ -33,6 +33,18 @@ class ContentWidgetCreate(SRGModel):
     dollar_type: str = Field("ContentWidget", alias="$type")
     title: str | None = None
     content_id: str
+    # SRGDEV-520: optional display options for the widget (same wire shape as a
+    # category's options, minus progression). Omit to use the server default. Shape:
+    #   {
+    #     "expandable": bool,                                  # needs a title to take effect
+    #     "cover": {"aspect": {"ratio": {"position": str, "ratio": str}}},
+    #     "view": {"presentation": {
+    #        "$type": "Custom",
+    #        "main": {"type": "Classic|List|Waterfall", "subType": "Extended|Compact"},
+    #        "expanded": {"type": "Waterfall"}}},
+    #   }
+    # subType Extended = large cards, Compact = small cards.
+    options: dict[str, Any] | None = None
 
 
 class CustomLinkCreate(SRGModel):
