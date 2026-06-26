@@ -31,6 +31,28 @@ class _AssetCreateBase(SRGModel):
         return data
 
 
+class AiProvenance(SRGModel):
+    """How an asset came to be / which model described it (SRGDEV-679)."""
+
+    source: str | None = None
+    prompt: str | None = None
+    revised_prompt: str | None = None
+    model: str | None = None
+    generated_at: str | None = None
+    description_model: str | None = None
+    described_at: str | None = None
+
+
+class AssetMetadata(SRGModel):
+    """Agent-readable descriptive metadata carried by every asset (SRGDEV-679)."""
+
+    description: str | None = None
+    alt_text: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    ai: AiProvenance | None = None
+    extra: dict[str, str] = Field(default_factory=dict)
+
+
 class Asset(SRGModel):
     """
     Base asset response. The actual type is indicated by the $type field
@@ -39,6 +61,7 @@ class Asset(SRGModel):
     id: str
     name: str
     cover: AssetCover | None = None
+    metadata: AssetMetadata | None = None
 
 
 class PlayableAsset(Asset):

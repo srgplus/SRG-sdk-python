@@ -221,3 +221,5 @@ class ContentV2(SRGModel):
     channels: list[ContentChannel] = Field(default_factory=list)
     categories: list[Any] = Field(default_factory=list)
     progression: ContentProgression | None = None
+    tags: list[str] = Field(default_factory=list)
+    ai_summary: str | None = None
