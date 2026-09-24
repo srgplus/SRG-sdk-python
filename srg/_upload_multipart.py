@@ -21,11 +21,14 @@ Part-size selection mirrors the iOS client (``MediaUploadsManager``):
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import struct
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
+from typing import IO
 
 import httpx
 
@@ -243,16 +246,40 @@ def get_image_dimensions(file_path: str | Path) -> tuple[float, float] | None:
         return None
 
 
+def get_image_dimensions_from_bytes(data: bytes) -> tuple[float, float] | None:
+    """Same as :func:`get_image_dimensions`, for bytes already in memory."""
+    dims = _read_image_dimensions_stdlib(io.BytesIO(data))
+    if dims is not None:
+        return dims
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            w, h = img.size
+            return float(w), float(h)
+    except Exception:
+        return None
+
+
+def _open_binary(source: str | Path | IO[bytes]) -> contextlib.AbstractContextManager:
+    if isinstance(source, (str, Path)):
+        return open(source, "rb")
+    return contextlib.nullcontext(source)
+
+
 def _read_image_dimensions_stdlib(
-    file_path: str | Path,
+    file_path: str | Path | IO[bytes],
 ) -> tuple[float, float] | None:
     """Parse width/height from common image headers without external deps.
 
     Supports PNG, JPEG (incl. progressive), GIF, BMP, and RIFF/WEBP (VP8/VP8L/
     VP8X). Returns ``None`` for unrecognised formats or malformed headers.
+    Accepts a path or an already-open binary stream.
     """
     try:
-        with open(file_path, "rb") as f:
+        with _open_binary(file_path) as f:
             head = f.read(32)
             if len(head) < 16:
                 return None
