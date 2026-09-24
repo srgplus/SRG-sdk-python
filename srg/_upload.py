@@ -31,6 +31,83 @@ def extension_from_source(source: str | Path) -> str:
     return Path(path_str).suffix.lstrip(".").lower()
 
 
+_MIME_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/pjpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/bmp": "bmp",
+    "image/x-icon": "ico",
+    "image/vnd.microsoft.icon": "ico",
+}
+
+_EXT_TO_MIME = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "heic": "image/heic",
+    "heif": "image/heif",
+    "bmp": "image/bmp",
+    "ico": "image/x-icon",
+}
+
+
+def sniff_image_extension(content: bytes) -> str | None:
+    """Detect an image format from its magic bytes.
+
+    Returns a lowercase extension (``"jpg"``, ``"png"``, ``"webp"``, ...) or
+    ``None`` when the bytes are not a recognised image. Lets a cover come from
+    a URL without an extension (e.g. a signed Drive asset URL).
+    """
+    head = content[:32]
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"):
+            return "heic"
+        if brand in (b"mif1", b"msf1"):
+            return "heif"
+    if head[:2] == b"BM":
+        return "bmp"
+    if head[:4] == b"\x00\x00\x01\x00":
+        return "ico"
+    return None
+
+
+def resolve_image_extension(
+    content: bytes, source: str | Path, content_type: str | None = None
+) -> str:
+    """Pick the extension for an image: magic bytes, then the path, then the MIME.
+
+    Magic bytes win because they describe the actual file; the URL/path suffix
+    and the ``Content-Type`` header are fallbacks. Returns ``""`` if unknown.
+    """
+    mime = (content_type or "").split(";")[0].strip().lower()
+    return (
+        sniff_image_extension(content)
+        or extension_from_source(source)
+        or _MIME_TO_EXT.get(mime, "")
+    )
+
+
+def image_content_type(extension: str, fallback: str | None = None) -> str:
+    """MIME type for an image extension (used for the signed-URL PUT)."""
+    return _EXT_TO_MIME.get(extension.lower(), fallback or "application/octet-stream")
+
+
 def _content_type(source: str | Path) -> str:
     guess, _ = mimetypes.guess_type(str(source).split("?")[0])
     return guess or "application/octet-stream"
@@ -50,7 +127,8 @@ def read_image_sync(source: str | Path) -> tuple[bytes, str]:
     """
     image_str = str(source)
     if image_str.startswith(("http://", "https://")):
-        with httpx.Client() as client:
+        # Follow redirects: CDNs and "random image" services answer with 30x.
+        with httpx.Client(follow_redirects=True, timeout=60.0) as client:
             resp = client.get(image_str)
             resp.raise_for_status()
             return resp.content, resp.headers.get("content-type", _content_type(source))
@@ -72,7 +150,7 @@ async def read_image_async(source: str | Path) -> tuple[bytes, str]:
     """
     image_str = str(source)
     if image_str.startswith(("http://", "https://")):
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
             resp = await client.get(image_str)
             resp.raise_for_status()
             return resp.content, resp.headers.get("content-type", _content_type(source))

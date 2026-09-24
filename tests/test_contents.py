@@ -1,10 +1,24 @@
+import struct
 from unittest.mock import AsyncMock, Mock
 
+import pytest
+
+from srg.exceptions import SRGError
 from srg.resources.contents import AsyncContentsResource, ContentsResource
+from srg.schemas.common import ContentFileUploadParameters
 from srg.schemas.content import ContentChannelUpsert
 
 CONTENT_ID = "content-uuid-1"
 HUB_PROFILE_ID = "hub-profile-uuid-1"
+
+# Minimal PNG: signature + IHDR declaring 1080x1920 (enough for type/size sniffing).
+PNG_1080x1920 = (
+    b"\x89PNG\r\n\x1a\n"
+    + b"\x00\x00\x00\x0dIHDR"
+    + struct.pack(">II", 1080, 1920)
+    + b"\x08\x02\x00\x00\x00"
+    + b"\x00" * 16
+)
 
 UPLOAD_SIGNED_URL_PAYLOAD = {
     "id": CONTENT_ID,
@@ -292,248 +306,317 @@ UPLOAD_SIGNED_URL_NO_COVER = {
 }
 
 
-class TestContentsUpdateMerge:
+class TestContentsUpdatePatch:
     """
-    update() must do GET v2 first and merge: fields passed as None keep their
-    existing values; only explicitly provided values are replaced.
+    update() sends PATCH with ONLY the supplied fields. The backend keeps every
+    omitted field (cover, main asset, channels, categories, action buttons), so
+    an update that doesn't mention the cover can never wipe it (SRGDEV-235:
+    the old GET-merge-PUT omitted `cover`, and PUT treats that as "remove").
     """
 
-    def test_get_v2_is_called_before_put(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
+    @staticmethod
+    def _resource(mock_http: Mock) -> ContentsResource:
+        mock_http.patch.return_value = UPLOAD_SIGNED_URL_NO_COVER
+        return ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
-        mock_http.put.assert_called_once()
-
-    def test_preserves_name_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        body = mock_http.put.call_args[1]["json"]
-        assert body["name"] == "My Content"
-
-    def test_replaces_name_when_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, name="New Name", workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[1]["json"]["name"] == "New Name"
-
-    def test_preserves_privacy_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        # existing fixture has privacy="Public" — must not be reset to "Preview"
-        assert mock_http.put.call_args[1]["json"]["privacy"] == "Public"
-
-    def test_replaces_privacy_when_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, privacy="Private", workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[1]["json"]["privacy"] == "Private"
-
-    def test_preserves_channels_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        body = mock_http.put.call_args[1]["json"]
-        # Existing channel has two categories; must be serialised as upsert format.
-        assert body["channels"] == [
-            {"channelId": "channel-uuid-1", "categoryIds": ["cat-1", "cat-2"]}
-        ]
-
-    def test_clears_channels_when_empty_list_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, channels=[], workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[1]["json"]["channels"] == []
-
-    def test_replaces_channels_when_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
+    def test_uses_patch_on_content_endpoint(self, mock_http: Mock) -> None:
+        resource = self._resource(mock_http)
 
         resource.update(
-            CONTENT_ID, channels=["ch-new"], workspace_id="workspace-uuid-1"
+            CONTENT_ID,
+            name="New Name",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
         )
 
-        assert mock_http.put.call_args[1]["json"]["channels"] == [
+        mock_http.put.assert_not_called()
+        mock_http.patch.assert_called_once()
+        assert mock_http.patch.call_args[0][0] == f"/api/v1/contents/{CONTENT_ID}"
+        assert mock_http.patch.call_args[1]["params"] == {
+            "hubProfileId": HUB_PROFILE_ID
+        }
+
+    def test_context_only_update_never_touches_cover(self, mock_http: Mock) -> None:
+        """Regression: rewriting the body must not send (and so not wipe) the cover."""
+        resource = self._resource(mock_http)
+        new_context = [{"$type": "Text", "content": "caption"}]
+
+        resource.update(
+            CONTENT_ID,
+            context=new_context,
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        body = mock_http.patch.call_args[1]["json"]
+        assert body == {"context": new_context}
+        assert "cover" not in body
+        assert "mainAssetId" not in body
+        assert "channels" not in body
+        assert "categories" not in body
+
+    def test_only_supplied_scalars_are_sent(self, mock_http: Mock) -> None:
+        resource = self._resource(mock_http)
+
+        resource.update(
+            CONTENT_ID,
+            privacy="Private",
+            details="New details",
+            url="https://example.org",
+            main_asset_id="asset-2",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        assert mock_http.patch.call_args[1]["json"] == {
+            "privacy": "Private",
+            "details": "New details",
+            "url": "https://example.org",
+            "mainAssetId": "asset-2",
+        }
+
+    def test_resolves_hub_profile_from_content_when_missing(
+        self, mock_http: Mock, content_v2_payload: dict
+    ) -> None:
+        mock_http.get.return_value = content_v2_payload
+        resource = self._resource(mock_http)
+
+        resource.update(CONTENT_ID, name="N", workspace_id="workspace-uuid-1")
+
+        mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
+        assert mock_http.patch.call_args[1]["params"] == {
+            "hubProfileId": HUB_PROFILE_ID
+        }
+        # The read is only for the hub id — nothing from it is written back.
+        assert mock_http.patch.call_args[1]["json"] == {"name": "N"}
+
+    def test_no_read_when_hub_profile_is_passed(self, mock_http: Mock) -> None:
+        resource = self._resource(mock_http)
+
+        resource.update(
+            CONTENT_ID,
+            name="N",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        mock_http.get.assert_not_called()
+
+    def test_clears_channels_when_empty_list_provided(self, mock_http: Mock) -> None:
+        resource = self._resource(mock_http)
+
+        resource.update(
+            CONTENT_ID,
+            channels=[],
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        assert mock_http.patch.call_args[1]["json"] == {"channels": []}
+
+    def test_replaces_channels_when_provided(self, mock_http: Mock) -> None:
+        resource = self._resource(mock_http)
+
+        resource.update(
+            CONTENT_ID,
+            channels=["ch-new"],
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        assert mock_http.patch.call_args[1]["json"]["channels"] == [
             {"channelId": "ch-new", "categoryIds": []}
         ]
 
-    def test_preserves_context_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
+    def test_manual_keep_cover_marker_keeps_image_key(self, mock_http: Mock) -> None:
+        """The backend DTO requires `image` to be present, even when null."""
+        resource = self._resource(mock_http)
 
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        body = mock_http.put.call_args[1]["json"]
-        assert len(body["context"]) == 2
-        assert body["context"][0]["$type"] == "Text"
-
-    def test_replaces_context_when_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        new_context = [{"$type": "Text", "content": "Updated"}]
         resource.update(
-            CONTENT_ID, context=new_context, workspace_id="workspace-uuid-1"
+            CONTENT_ID,
+            cover=ContentFileUploadParameters(image=None, generate_signed_url=False),
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
         )
 
-        assert mock_http.put.call_args[1]["json"]["context"] == new_context
+        assert mock_http.patch.call_args[1]["json"]["cover"] == {
+            "image": None,
+            "generateSignedUrl": False,
+        }
 
-    def test_preserves_categories_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
+
+class TestContentsUpdateCoverImage:
+    """cover_image: type + dimensions come from the bytes, so URLs need no extension."""
+
+    SIGNED = {
+        "id": CONTENT_ID,
+        "coverSignedUrl": {"url": "https://r2.example/signed-put"},
+        "coverExtension": "png",
+        "context": [],
+        "metadataHeaders": {"x-amz-meta-type": "ContentCover"},
+    }
+
+    def test_extensionless_url_uses_sniffed_type_and_real_size(
+        self, mock_http: Mock, content_payload: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
+        uploads: list[tuple] = []
+        monkeypatch.setattr(
+            "srg.resources.contents.read_image_sync",
+            lambda _src: (PNG_1080x1920, "binary/octet-stream"),
+        )
+        monkeypatch.setattr(
+            "srg.resources.contents.put_bytes_to_signed_url",
+            lambda url, content, ctype, extra_headers=None: uploads.append(
+                (url, ctype, extra_headers, len(content))
+            ),
+        )
+        mock_http.patch.return_value = self.SIGNED
+        mock_http.get.return_value = content_payload
         resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
+        resource.update(
+            CONTENT_ID,
+            cover_image="https://r2.example/hub-profiles/h/assets/a1?X-Amz-Signature=s",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
 
-        body = mock_http.put.call_args[1]["json"]
-        assert body["categories"] == [{"id": "cat-1"}, {"id": "cat-2"}]
-
-    def test_preserves_details_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[1]["json"]["details"] == "Existing details"
-
-    def test_preserves_main_asset_when_not_provided(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[1]["json"]["mainAssetId"] == "asset-1"
-
-    def test_put_called_on_correct_endpoint(
-        self, mock_http: Mock, content_v2_payload: dict
-    ) -> None:
-        mock_http.get.return_value = content_v2_payload
-        mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = ContentsResource({"workspace-uuid-1": mock_http})
-
-        resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        assert mock_http.put.call_args[0][0] == f"/api/v1/contents/{CONTENT_ID}"
-
-
-class TestAsyncContentsUpdateMerge:
-    """Async mirror of TestContentsUpdateMerge."""
-
-    async def test_get_v2_is_called_before_put(
-        self, async_mock_http: AsyncMock, content_v2_payload: dict
-    ) -> None:
-        async_mock_http.get.return_value = content_v2_payload
-        async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
-
-        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        async_mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
-        async_mock_http.put.assert_called_once()
-
-    async def test_preserves_privacy_when_not_provided(
-        self, async_mock_http: AsyncMock, content_v2_payload: dict
-    ) -> None:
-        async_mock_http.get.return_value = content_v2_payload
-        async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
-
-        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        assert async_mock_http.put.call_args[1]["json"]["privacy"] == "Public"
-
-    async def test_preserves_channels_when_not_provided(
-        self, async_mock_http: AsyncMock, content_v2_payload: dict
-    ) -> None:
-        async_mock_http.get.return_value = content_v2_payload
-        async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
-
-        await resource.update(CONTENT_ID, workspace_id="workspace-uuid-1")
-
-        body = async_mock_http.put.call_args[1]["json"]
-        assert body["channels"] == [
-            {"channelId": "channel-uuid-1", "categoryIds": ["cat-1", "cat-2"]}
+        cover = mock_http.patch.call_args[1]["json"]["cover"]
+        assert cover["generateSignedUrl"] is True
+        assert cover["image"] == {
+            "width": 1080,
+            "height": 1920,
+            "size": len(PNG_1080x1920),
+            "extension": "png",
+        }
+        # The PUT carries the MIME the signed URL was bound to, not the
+        # server's generic content type, plus the metadata headers.
+        assert uploads == [
+            (
+                "https://r2.example/signed-put",
+                "image/png",
+                {"x-amz-meta-type": "ContentCover"},
+                len(PNG_1080x1920),
+            )
         ]
 
-    async def test_replaces_context_when_provided(
-        self, async_mock_http: AsyncMock, content_v2_payload: dict
+    def test_unrecognised_bytes_without_hints_raise(
+        self, mock_http: Mock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async_mock_http.get.return_value = content_v2_payload
-        async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
-        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+        monkeypatch.setattr(
+            "srg.resources.contents.read_image_sync",
+            lambda _src: (b"not an image at all", "application/octet-stream"),
+        )
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
 
-        new_context = [{"$type": "Text", "content": "New"}]
-        await resource.update(
-            CONTENT_ID, context=new_context, workspace_id="workspace-uuid-1"
+        with pytest.raises(SRGError, match="image type"):
+            resource.update(
+                CONTENT_ID,
+                cover_image="https://example.com/blob",
+                hub_profile_id=HUB_PROFILE_ID,
+                workspace_id="workspace-uuid-1",
+            )
+        mock_http.patch.assert_not_called()
+
+
+class TestContentsSetCoverFromAsset:
+    def test_posts_cover_asset_id(self, mock_http: Mock) -> None:
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        resource.set_cover_from_asset(
+            CONTENT_ID,
+            "asset-9",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
         )
 
-        assert async_mock_http.put.call_args[1]["json"]["context"] == new_context
+        mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/cover/from-asset",
+            json={"coverAssetId": "asset-9"},
+            params={"hubProfileId": HUB_PROFILE_ID},
+        )
 
-    async def test_clears_channels_when_empty_list_provided(
+    def test_resolves_hub_profile_when_missing(
+        self, mock_http: Mock, content_v2_payload: dict
+    ) -> None:
+        mock_http.get.return_value = content_v2_payload
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        resource.set_cover_from_asset(
+            CONTENT_ID, "asset-9", workspace_id="workspace-uuid-1"
+        )
+
+        assert mock_http.post.call_args[1]["params"] == {"hubProfileId": HUB_PROFILE_ID}
+
+
+class TestAsyncContentsUpdatePatch:
+    """Async mirror of TestContentsUpdatePatch."""
+
+    async def test_context_only_update_never_touches_cover(
+        self, async_mock_http: AsyncMock
+    ) -> None:
+        async_mock_http.patch.return_value = UPLOAD_SIGNED_URL_NO_COVER
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+        new_context = [{"$type": "Text", "content": "New"}]
+
+        await resource.update(
+            CONTENT_ID,
+            context=new_context,
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        async_mock_http.put.assert_not_called()
+        assert async_mock_http.patch.call_args[0][0] == f"/api/v1/contents/{CONTENT_ID}"
+        assert async_mock_http.patch.call_args[1]["json"] == {"context": new_context}
+
+    async def test_resolves_hub_profile_from_content_when_missing(
         self, async_mock_http: AsyncMock, content_v2_payload: dict
     ) -> None:
         async_mock_http.get.return_value = content_v2_payload
-        async_mock_http.put.return_value = UPLOAD_SIGNED_URL_NO_COVER
+        async_mock_http.patch.return_value = UPLOAD_SIGNED_URL_NO_COVER
         resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
 
-        await resource.update(CONTENT_ID, channels=[], workspace_id="workspace-uuid-1")
+        await resource.update(
+            CONTENT_ID, privacy="Private", workspace_id="workspace-uuid-1"
+        )
 
-        assert async_mock_http.put.call_args[1]["json"]["channels"] == []
+        async_mock_http.get.assert_called_once_with(f"/api/v2/contents/{CONTENT_ID}")
+        assert async_mock_http.patch.call_args[1]["params"] == {
+            "hubProfileId": HUB_PROFILE_ID
+        }
+        assert async_mock_http.patch.call_args[1]["json"] == {"privacy": "Private"}
+
+    async def test_clears_channels_when_empty_list_provided(
+        self, async_mock_http: AsyncMock
+    ) -> None:
+        async_mock_http.patch.return_value = UPLOAD_SIGNED_URL_NO_COVER
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        await resource.update(
+            CONTENT_ID,
+            channels=[],
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        assert async_mock_http.patch.call_args[1]["json"] == {"channels": []}
+
+    async def test_set_cover_from_asset(self, async_mock_http: AsyncMock) -> None:
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        await resource.set_cover_from_asset(
+            CONTENT_ID,
+            "asset-9",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        async_mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/cover/from-asset",
+            json={"coverAssetId": "asset-9"},
+            params={"hubProfileId": HUB_PROFILE_ID},
+        )
 
 
 class TestAsyncContentsCreate:

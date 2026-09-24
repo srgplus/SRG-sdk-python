@@ -85,8 +85,10 @@ class SyncHTTPClient(BaseHTTPClient):
     ) -> Any:
         return self._process(self._client.put(path, json=json, params=params))
 
-    def patch(self, path: str, *, json: Any = None) -> Any:
-        return self._process(self._client.patch(path, json=json))
+    def patch(
+        self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
+    ) -> Any:
+        return self._process(self._client.patch(path, json=json, params=params))
 
     def delete(self, path: str) -> Any:
         return self._process(self._client.delete(path))
@@ -123,8 +125,10 @@ class AsyncHTTPClient(BaseHTTPClient):
     ) -> Any:
         return self._process(await self._client.put(path, json=json, params=params))
 
-    async def patch(self, path: str, *, json: Any = None) -> Any:
-        return self._process(await self._client.patch(path, json=json))
+    async def patch(
+        self, path: str, *, json: Any = None, params: dict[str, Any] | None = None
+    ) -> Any:
+        return self._process(await self._client.patch(path, json=json, params=params))
 
     async def delete(self, path: str) -> Any:
         return self._process(await self._client.delete(path))

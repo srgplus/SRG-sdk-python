@@ -6,12 +6,14 @@ from pydantic import BaseModel
 
 from srg._http import AsyncHTTPClient, SyncHTTPClient
 from srg._upload import (
-    extension_from_source,
+    image_content_type,
     put_bytes_to_signed_url,
     put_bytes_to_signed_url_async,
     read_image_async,
     read_image_sync,
+    resolve_image_extension,
 )
+from srg._upload_multipart import get_image_dimensions_from_bytes
 from srg.exceptions import SRGError
 from srg.schemas.common import (
     ContentFileUploadParameters,
@@ -57,18 +59,88 @@ def _normalize_channels(
     return result
 
 
-def _make_image_upsert(img_bytes: bytes, source: str | Path) -> ImageUpsert:
-    ext = extension_from_source(source)
-    return ImageUpsert(width=1, height=1, size=len(img_bytes), extension=ext)
+def _make_image_upsert(
+    img_bytes: bytes, source: str | Path, content_type: str | None = None
+) -> ImageUpsert:
+    """Describe a cover image from its bytes: real type and real dimensions.
+
+    The type comes from the magic bytes first, so a URL without an extension
+    (e.g. a signed Drive asset URL) still works.
+    """
+    ext = resolve_image_extension(img_bytes, source, content_type)
+    if not ext:
+        where = str(source).split("?")[0]
+        raise SRGError(
+            f"Could not tell the image type of {where}: the bytes are not a "
+            "recognised image and there is no extension or image Content-Type."
+        )
+    dims = get_image_dimensions_from_bytes(img_bytes)
+    width, height = (int(dims[0]), int(dims[1])) if dims else (1, 1)
+    return ImageUpsert(width=width, height=height, size=len(img_bytes), extension=ext)
 
 
 def _make_content_file_params(
-    img_bytes: bytes, source: str | Path
+    img_bytes: bytes, source: str | Path, content_type: str | None = None
 ) -> ContentFileUploadParameters:
     return ContentFileUploadParameters(
-        image=_make_image_upsert(img_bytes, source),
+        image=_make_image_upsert(img_bytes, source, content_type),
         generate_signed_url=True,
     )
+
+
+def _ser_cover(cover: Any) -> dict:  # noqa: ANN401
+    """Serialize a cover upsert for the API.
+
+    ``image`` is a required property on the backend DTO, so it must be present
+    even when null (``{"image": null, "generateSignedUrl": false}`` = keep).
+    """
+    data = (
+        cover.model_dump(by_alias=True, exclude_none=True)
+        if isinstance(cover, BaseModel)
+        else dict(cover)
+    )
+    data.setdefault("image", None)
+    return data
+
+
+def _build_patch_body(
+    *,
+    name: str | None,
+    privacy: str | None,
+    details: str | None,
+    url: str | None,
+    main_asset_id: str | None,
+    cover: Any | None,  # noqa: ANN401
+    channels: list[Any] | None,
+    context: list[Any] | None,
+    categories: list[Any] | None,
+) -> dict:
+    """Body for PATCH /contents/{id}: only the fields the caller supplied.
+
+    The backend keeps the stored value of every omitted field — cover, main
+    asset, channels, categories, action buttons — so a body-only edit can
+    never wipe them.
+    """
+    body: dict = {}
+    if name is not None:
+        body["name"] = name
+    if privacy is not None:
+        body["privacy"] = privacy
+    if details is not None:
+        body["details"] = details
+    if url is not None:
+        body["url"] = url
+    if main_asset_id is not None:
+        body["mainAssetId"] = main_asset_id
+    if channels is not None:
+        body["channels"] = _normalize_channels(channels)
+    if context is not None:
+        body["context"] = _ser_list(context)
+    if categories is not None:
+        body["categories"] = _ser_list(categories)
+    if cover is not None:
+        body["cover"] = _ser_cover(cover)
+    return body
 
 
 def _upload_cover_sync(
@@ -202,11 +274,13 @@ class ContentsResource:
         # ContentFileUploadParameters). We must include size so the server can
         # generate a signed URL with the correct content-length.
         _img_bytes: bytes | None = None
-        _img_content_type: str | None = None
+        _upload_type = "application/octet-stream"
 
         if cover_image is not None and cover is None:
-            _img_bytes, _img_content_type = read_image_sync(cover_image)
-            cover = _make_image_upsert(_img_bytes, cover_image)
+            _img_bytes, _served_type = read_image_sync(cover_image)
+            cover = _make_image_upsert(_img_bytes, cover_image, _served_type)
+            # The signed URL is bound to the MIME of the declared extension.
+            _upload_type = image_content_type(cover.extension, _served_type)
 
         body: dict = {
             "name": name,
@@ -232,9 +306,7 @@ class ContentsResource:
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
-            _upload_cover_sync(
-                result, _img_bytes, _img_content_type or "application/octet-stream"
-            )
+            _upload_cover_sync(result, _img_bytes, _upload_type)
 
         if cover_image is not None:
             return self.get(
@@ -335,14 +407,21 @@ class ContentsResource:
         workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
-        Update a content item's metadata.
+        Update a content item. Only the fields you pass are changed.
 
-        Fetches the current state first, then merges the provided values.
-        Fields left as ``None`` are preserved from the existing content —
-        only explicitly passed values are changed.
+        Sends ``PATCH /api/v1/contents/{id}`` with just the supplied fields.
+        The backend keeps the stored value of every omitted field, so an
+        update that doesn't mention the cover, main asset, channels,
+        categories or action buttons never wipes them (the old
+        GET-merge-PUT approach did: PUT treats an omitted cover as "remove").
+
+        Lists you DO pass — ``channels``, ``context``, ``categories`` —
+        replace the stored list. To append, read the content first
+        (:meth:`get_v2`) and send the full new list.
 
         **Auto-upload mode** — pass ``cover_image`` as a local file path or
-        an ``http(s)://`` URL. The SDK uploads the image and returns the
+        an ``http(s)://`` URL (an extension is not required: the image type
+        is read from the bytes). The SDK uploads the image and returns the
         updated :class:`~srg.schemas.content.Content`.
 
         **Manual mode** — pass ``cover`` as
@@ -350,20 +429,24 @@ class ContentsResource:
         returns :class:`~srg.schemas.content.ContentUploadSignedUrl` with a
         signed URL so you can upload the image yourself.
 
+        To use an image that is already in the hub Drive as the cover, call
+        :meth:`set_cover_from_asset` instead.
+
         Args:
             content_id: ID of the content item to update.
-            name: New display title. Keeps existing if ``None``.
-            hub_profile_id: Hub profile that owns this content.
-            privacy: New visibility level. Keeps existing if ``None``.
-            details: New body text. Keeps existing if ``None``.
-            url: New external URL. Keeps existing if ``None``.
-            main_asset_id: New primary asset ID. Keeps existing if ``None``.
+            name: New display title. Unchanged if ``None``.
+            hub_profile_id: Hub profile that owns this content. Resolved from
+                the content when omitted (one extra GET).
+            privacy: New visibility level. Unchanged if ``None``.
+            details: New body text. Unchanged if ``None``.
+            url: New external URL. Unchanged if ``None``.
+            main_asset_id: New primary asset ID. Unchanged if ``None``.
             cover_image: Local path or ``http(s)://`` URL of the new cover
                 image. Triggers auto-upload.
             cover: Cover image upload parameters (manual mode).
-            channels: Channel/category placements. Keeps existing if ``None``.
-            context: Context widgets. Keeps existing if ``None``.
-            categories: Category assignments. Keeps existing if ``None``.
+            channels: Channel/category placements. Unchanged if ``None``.
+            context: Context widgets (the body). Unchanged if ``None``.
+            categories: Category options. Unchanged if ``None``.
 
         Returns:
             :class:`~srg.schemas.content.Content` when ``cover_image`` is
@@ -374,84 +457,89 @@ class ContentsResource:
         Example:
         ```python
         client = SRGClient(api_keys=["srgplus_your_key"])
-        # Only name and privacy change; channels/context/categories are preserved.
-        content = client.contents.update(
+        # Only the body changes; cover, channels and categories stay as they are.
+        client.contents.update(
             "01965f7a-0000-7000-8000-000000000005",
-            name="Welcome to the Team (v2)",
-            privacy="Public",
+            context=[{"$type": "Text", "content": "New caption"}],
             workspace_id="01965f7a-0000-7000-8000-000000000001",
         )
         ```
         """
-        existing = self.get_v2(content_id, workspace_id=workspace_id)
-
-        # The PUT route requires the owning hub profile. Fall back to the
-        # content's own hub profile when the caller didn't pass one, so an
-        # update never fails with a bare 400 just for omitting it.
-        hub_profile_id = hub_profile_id or existing.hub_profile_id
-
-        _name = name if name is not None else existing.name
-        _privacy = privacy if privacy is not None else existing.privacy
-        _details = details if details is not None else existing.details
-        _url = url if url is not None else existing.url
-        _main_asset_id = (
-            main_asset_id
-            if main_asset_id is not None
-            else (existing.main_asset.id if existing.main_asset else None)
-        )
-        _channels: list[str | ContentChannelUpsert] = (
-            channels
-            if channels is not None
-            else [
-                ContentChannelUpsert(
-                    channel_id=ch.id,
-                    category_ids=[c.id for c in ch.categories],
-                )
-                for ch in existing.channels
-            ]
-        )
-        _context = context if context is not None else existing.context
-        _categories = categories if categories is not None else existing.categories
+        if hub_profile_id is None:
+            hub_profile_id = self.get_v2(
+                content_id, workspace_id=workspace_id
+            ).hub_profile_id
 
         _img_bytes: bytes | None = None
-        _img_content_type: str | None = None
+        _upload_type = "application/octet-stream"
 
         if cover_image is not None and cover is None:
-            _img_bytes, _img_content_type = read_image_sync(cover_image)
-            cover = _make_content_file_params(_img_bytes, cover_image)
+            _img_bytes, _served_type = read_image_sync(cover_image)
+            cover = _make_content_file_params(_img_bytes, cover_image, _served_type)
+            if cover.image is not None:
+                _upload_type = image_content_type(cover.image.extension, _served_type)
 
-        body: dict = {
-            "name": _name,
-            "privacy": _privacy,
-            "channels": _normalize_channels(_channels),
-            "context": _ser_list(_context),
-            "categories": _ser_list(_categories),
-        }
-        if _details is not None:
-            body["details"] = _details
-        if _url is not None:
-            body["url"] = _url
-        if _main_asset_id is not None:
-            body["mainAssetId"] = _main_asset_id
-        if cover is not None:
-            body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
+        body = _build_patch_body(
+            name=name,
+            privacy=privacy,
+            details=details,
+            url=url,
+            main_asset_id=main_asset_id,
+            cover=cover,
+            channels=channels,
+            context=context,
+            categories=categories,
+        )
 
-        params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = self._get_http(workspace_id).put(
-            f"/api/v1/contents/{content_id}", json=body, params=params
+        data = self._get_http(workspace_id).patch(
+            f"/api/v1/contents/{content_id}",
+            json=body,
+            params={"hubProfileId": hub_profile_id},
         )
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
-            _upload_cover_sync(
-                result, _img_bytes, _img_content_type or "application/octet-stream"
-            )
+            _upload_cover_sync(result, _img_bytes, _upload_type)
 
         if cover_image is not None:
             return self.get(
                 content_id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
             )
         return result
+
+    def set_cover_from_asset(
+        self,
+        content_id: str,
+        asset_id: str,
+        *,
+        hub_profile_id: str | None = None,
+        workspace_id: str,
+    ) -> None:
+        """
+        Use an image that is already in the hub Drive as the content's cover.
+
+        Calls ``POST /api/v1/contents/{id}/cover/from-asset``. The backend
+        copies the asset's original bytes into the content cover (so the cover
+        survives deletion of the source asset) and regenerates the thumbnails.
+        The asset must be an Image whose upload has finished; right after an
+        upload the backend may still answer 400 "still uploading" for a few
+        seconds — retry.
+
+        Args:
+            content_id: ID of the content item.
+            asset_id: ID of an Image asset in the same hub.
+            hub_profile_id: Owning hub profile. Resolved from the content
+                when omitted (one extra GET).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = self.get_v2(
+                content_id, workspace_id=workspace_id
+            ).hub_profile_id
+        self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/cover/from-asset",
+            json={"coverAssetId": asset_id},
+            params={"hubProfileId": hub_profile_id},
+        )
 
     def archive(self, content_id: str, *, workspace_id: str) -> None:
         """Archive a content item. Reversible — see :meth:`restore`.
@@ -1429,11 +1517,12 @@ class AsyncContentsResource:
         ```
         """
         _img_bytes: bytes | None = None
-        _img_content_type: str | None = None
+        _upload_type = "application/octet-stream"
 
         if cover_image is not None and cover is None:
-            _img_bytes, _img_content_type = await read_image_async(cover_image)
-            cover = _make_image_upsert(_img_bytes, cover_image)
+            _img_bytes, _served_type = await read_image_async(cover_image)
+            cover = _make_image_upsert(_img_bytes, cover_image, _served_type)
+            _upload_type = image_content_type(cover.extension, _served_type)
 
         body: dict = {
             "name": name,
@@ -1459,9 +1548,7 @@ class AsyncContentsResource:
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
-            await _upload_cover_async(
-                result, _img_bytes, _img_content_type or "application/octet-stream"
-            )
+            await _upload_cover_async(result, _img_bytes, _upload_type)
 
         if cover_image is not None:
             return await self.get(
@@ -1537,120 +1624,90 @@ class AsyncContentsResource:
         workspace_id: str,
     ) -> Content | ContentUploadSignedUrl:
         """
-        Update a content item's metadata.
+        Update a content item. Only the fields you pass are changed.
 
-        Fetches the current state first, then merges the provided values.
-        Fields left as ``None`` are preserved from the existing content —
-        only explicitly passed values are changed.
+        Async counterpart of :meth:`ContentsResource.update`: sends
+        ``PATCH /api/v1/contents/{id}`` with just the supplied fields, so the
+        cover, main asset, channels, categories and action buttons are never
+        wiped by an update that doesn't mention them. Lists you pass
+        (``channels``, ``context``, ``categories``) replace the stored list.
 
         **Auto-upload mode** — pass ``cover_image`` as a local file path or
-        an ``http(s)://`` URL. The SDK uploads the image and returns the
-        updated :class:`~srg.schemas.content.Content`. **Manual mode** — pass
+        an ``http(s)://`` URL (no extension needed). **Manual mode** — pass
         ``cover`` to get back
         :class:`~srg.schemas.content.ContentUploadSignedUrl`.
-
-        Args:
-            content_id: ID of the content item.
-            name: New display title. Keeps existing if ``None``.
-            hub_profile_id: Hub profile that owns this content.
-            privacy: New visibility level. Keeps existing if ``None``.
-            details: New body text. Keeps existing if ``None``.
-            url: New external URL. Keeps existing if ``None``.
-            main_asset_id: New primary asset ID. Keeps existing if ``None``.
-            cover_image: Local path or ``http(s)://`` URL of the new cover
-                image. Triggers auto-upload.
-            cover: Cover upload parameters (manual mode).
-            channels: Channel/category placements. Keeps existing if ``None``.
-            context: Context widgets. Keeps existing if ``None``.
-            categories: Category assignments. Keeps existing if ``None``.
-
-        Returns:
-            :class:`~srg.schemas.content.Content` when ``cover_image`` is
-            provided (auto-upload mode).
-            :class:`~srg.schemas.content.ContentUploadSignedUrl` otherwise
-            (manual mode).
 
         Example:
         ```python
         async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
-            # Only name changes; channels/context/categories are preserved.
-            content = await client.contents.update(
+            # Only the body changes; cover, channels and categories stay.
+            await client.contents.update(
                 "01965f7a-0000-7000-8000-000000000005",
-                name="Welcome to the Team (v2)",
-                privacy="Public",
+                context=[{"$type": "Text", "content": "New caption"}],
                 workspace_id="01965f7a-0000-7000-8000-000000000001",
             )
         ```
         """
-        existing = await self.get_v2(content_id, workspace_id=workspace_id)
-
-        # PUT route requires the owning hub profile; fall back to the content's
-        # own when the caller omitted it (see sync update for rationale).
-        hub_profile_id = hub_profile_id or existing.hub_profile_id
-
-        _name = name if name is not None else existing.name
-        _privacy = privacy if privacy is not None else existing.privacy
-        _details = details if details is not None else existing.details
-        _url = url if url is not None else existing.url
-        _main_asset_id = (
-            main_asset_id
-            if main_asset_id is not None
-            else (existing.main_asset.id if existing.main_asset else None)
-        )
-        _channels: list[str | ContentChannelUpsert] = (
-            channels
-            if channels is not None
-            else [
-                ContentChannelUpsert(
-                    channel_id=ch.id,
-                    category_ids=[c.id for c in ch.categories],
-                )
-                for ch in existing.channels
-            ]
-        )
-        _context = context if context is not None else existing.context
-        _categories = categories if categories is not None else existing.categories
+        if hub_profile_id is None:
+            hub_profile_id = (
+                await self.get_v2(content_id, workspace_id=workspace_id)
+            ).hub_profile_id
 
         _img_bytes: bytes | None = None
-        _img_content_type: str | None = None
+        _upload_type = "application/octet-stream"
 
         if cover_image is not None and cover is None:
-            _img_bytes, _img_content_type = await read_image_async(cover_image)
-            cover = _make_content_file_params(_img_bytes, cover_image)
+            _img_bytes, _served_type = await read_image_async(cover_image)
+            cover = _make_content_file_params(_img_bytes, cover_image, _served_type)
+            if cover.image is not None:
+                _upload_type = image_content_type(cover.image.extension, _served_type)
 
-        body: dict = {
-            "name": _name,
-            "privacy": _privacy,
-            "channels": _normalize_channels(_channels),
-            "context": _ser_list(_context),
-            "categories": _ser_list(_categories),
-        }
+        body = _build_patch_body(
+            name=name,
+            privacy=privacy,
+            details=details,
+            url=url,
+            main_asset_id=main_asset_id,
+            cover=cover,
+            channels=channels,
+            context=context,
+            categories=categories,
+        )
 
-        if _details is not None:
-            body["details"] = _details
-        if _url is not None:
-            body["url"] = _url
-        if _main_asset_id is not None:
-            body["mainAssetId"] = _main_asset_id
-        if cover is not None:
-            body["cover"] = cover.model_dump(by_alias=True, exclude_none=True)
-
-        params = {"hubProfileId": hub_profile_id} if hub_profile_id else None
-        data = await self._get_http(workspace_id).put(
-            f"/api/v1/contents/{content_id}", json=body, params=params
+        data = await self._get_http(workspace_id).patch(
+            f"/api/v1/contents/{content_id}",
+            json=body,
+            params={"hubProfileId": hub_profile_id},
         )
         result = ContentUploadSignedUrl.model_validate(data)
 
         if _img_bytes is not None:
-            await _upload_cover_async(
-                result, _img_bytes, _img_content_type or "application/octet-stream"
-            )
+            await _upload_cover_async(result, _img_bytes, _upload_type)
 
         if cover_image is not None:
             return await self.get(
                 content_id, hub_profile_id=hub_profile_id, workspace_id=workspace_id
             )
         return result
+
+    async def set_cover_from_asset(
+        self,
+        content_id: str,
+        asset_id: str,
+        *,
+        hub_profile_id: str | None = None,
+        workspace_id: str,
+    ) -> None:
+        """Async counterpart of :meth:`ContentsResource.set_cover_from_asset`."""
+        if hub_profile_id is None:
+            hub_profile_id = (
+                await self.get_v2(content_id, workspace_id=workspace_id)
+            ).hub_profile_id
+        await self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/cover/from-asset",
+            json={"coverAssetId": asset_id},
+            params={"hubProfileId": hub_profile_id},
+        )
 
     async def archive(self, content_id: str, *, workspace_id: str) -> None:
         """Archive a content item (reversible — see :meth:`restore`)."""

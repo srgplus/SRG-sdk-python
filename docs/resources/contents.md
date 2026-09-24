@@ -187,9 +187,9 @@ Content(
 def update(
     content_id: str,
     *,
-    name: str,
+    name: str | None = None,
     hub_profile_id: str | None = None,
-    privacy: ContentPrivacy = "Preview",
+    privacy: ContentPrivacy | None = None,
     details: str | None = None,
     url: str | None = None,
     main_asset_id: str | None = None,
@@ -197,41 +197,49 @@ def update(
     cover: ContentFileUploadParameters | None = None,
     channels: list[str | ContentChannelUpsert] | None = None,
     context: list[Any] | None = None,
-    categories: list[Any] | None = None
+    categories: list[Any] | None = None,
+    workspace_id: str
 ) -> Content | ContentUploadSignedUrl
 ```
 
-Update a content item's metadata.
+Update a content item. Only the fields you pass are changed.
 
-Replaces all metadata fields on the content item with the provided
-values.
+Sends ``PATCH /api/v1/contents/{id}`` with just the supplied fields. The
+backend keeps the stored value of every omitted field, so an update that
+doesn't mention the cover, main asset, channels, categories or action
+buttons never wipes them. Lists you DO pass (``channels``, ``context``,
+``categories``) replace the stored list: to append, read the content first
+with ``get_v2`` and send the full new list.
 
-**Auto-upload mode** — pass ``cover_image`` as a local file path or
-an ``http(s)://`` URL. The SDK uploads the image and returns the
-updated :class:`~srg.schemas.content.Content`.
+**Auto-upload mode** — pass ``cover_image`` as a local file path or an
+``http(s)://`` URL. No extension is needed: the image type and size are read
+from the bytes. The SDK uploads the image and returns the updated
+:class:`~srg.schemas.content.Content`.
 
 **Manual mode** — pass ``cover`` as
-:class:`~srg.schemas.common.ContentFileUploadParameters`. The API
-returns :class:`~srg.schemas.content.ContentUploadSignedUrl` with a
-signed URL so you can upload the image yourself.
+:class:`~srg.schemas.common.ContentFileUploadParameters`. The API returns
+:class:`~srg.schemas.content.ContentUploadSignedUrl` with a signed URL so you
+can upload the image yourself.
+
+To use an image that is already in the hub Drive, call
+``set_cover_from_asset`` instead.
 
 **Arguments**:
 
 - `content_id` - ID of the content item to update.
-- `name` - New display title.
-- `hub_profile_id` - Hub profile that owns this content. Required by
-  the API — pass the same value used when creating the content.
-- `privacy` - New visibility level.
-- `details` - New body text / description. Pass ``None`` to clear.
-- `url` - New external URL. Pass ``None`` to clear.
-- `main_asset_id` - New primary asset ID. Pass ``None`` to clear.
-- `cover_image` - Local path or ``http(s)://`` URL of the new cover
-  image. Triggers auto-upload.
+- `name` - New display title. Unchanged if ``None``.
+- `hub_profile_id` - Hub profile that owns this content. Resolved from the
+  content when omitted (one extra GET).
+- `privacy` - New visibility level. Unchanged if ``None``.
+- `details` - New body text / description. Unchanged if ``None``.
+- `url` - New external URL. Unchanged if ``None``.
+- `main_asset_id` - New primary asset ID. Unchanged if ``None``.
+- `cover_image` - Local path or ``http(s)://`` URL of the new cover image.
+  Triggers auto-upload.
 - `cover` - Cover image upload parameters (manual mode).
 - `channels` - New channel/category placements. Replaces existing.
-- `context` - New context objects. Replaces existing.
-- `categories` - New category assignments. Replaces existing.
-  
+- `context` - New body widgets. Replaces existing.
+- `categories` - New category options. Replaces existing.
 
 **Returns**:
 
@@ -239,37 +247,52 @@ signed URL so you can upload the image yourself.
   provided (auto-upload mode).
   :class:`~srg.schemas.content.ContentUploadSignedUrl` otherwise
   (manual mode).
-  
 
 **Example**:
 
 ```python
-client = SRGClient(api_key="srgplus_your_key")
-content = client.contents.update(
+client = SRGClient(api_keys=["srgplus_your_key"])
+# Only the body changes; the cover, channels and categories stay as they are.
+client.contents.update(
     "01965f7a-0000-7000-8000-000000000005",
-    name="Welcome to the Team (v2)",
-    privacy="Public",
-    details="Updated onboarding guide.",
-    cover_image="/path/to/new_cover.jpg",
+    context=[{"$type": "Text", "content": "New caption"}],
+    workspace_id="01965f7a-0000-7000-8000-000000000001",
 )
-# content is Content with cover already populated
 ```
-  
-  Example response:
+
+<a id="srg.resources.contents.ContentsResource.set_cover_from_asset"></a>
+
+#### set\_cover\_from\_asset
+
 ```python
-Content(
-    id="01965f7a-0000-7000-8000-000000000005",
-    name="Welcome to the Team (v2)",
-    details="Updated onboarding guide.",
+def set_cover_from_asset(
+    content_id: str,
+    asset_id: str,
+    *,
+    hub_profile_id: str | None = None,
+    workspace_id: str
+) -> None
+```
+
+Use an image that is already in the hub Drive as the content's cover
+(``POST /api/v1/contents/{id}/cover/from-asset``). The backend copies the
+asset's bytes into the content cover and regenerates the thumbnails, so the
+cover survives deletion of the source asset. The asset must be an Image whose
+upload has finished; right after an upload the backend can answer 400 "still
+uploading" for a few seconds, so retry.
+
+**Example**:
+
+```python
+image = client.assets.upload(
     hub_profile_id="01965f7a-0000-7000-8000-000000000002",
-    cover=ContentCover(
-        urls=CoverUrls(
-            original="https://cdn.srgplus.com/covers/welcome-v2.jpg",
-        ),
-        extension="jpg",
-        modified="2025-06-01T12:00:00Z",
-    ),
-    channels=[],
+    file="/path/to/cover.jpg",
+    workspace_id="01965f7a-0000-7000-8000-000000000001",
+)
+client.contents.set_cover_from_asset(
+    "01965f7a-0000-7000-8000-000000000005",
+    image.id,
+    workspace_id="01965f7a-0000-7000-8000-000000000001",
 )
 ```
 
@@ -964,9 +987,9 @@ Content(
 async def update(
     content_id: str,
     *,
-    name: str,
+    name: str | None = None,
     hub_profile_id: str | None = None,
-    privacy: ContentPrivacy = "Preview",
+    privacy: ContentPrivacy | None = None,
     details: str | None = None,
     url: str | None = None,
     main_asset_id: str | None = None,
@@ -974,71 +997,43 @@ async def update(
     cover: ContentFileUploadParameters | None = None,
     channels: list[str | ContentChannelUpsert] | None = None,
     context: list[Any] | None = None,
-    categories: list[Any] | None = None
+    categories: list[Any] | None = None,
+    workspace_id: str
 ) -> Content | ContentUploadSignedUrl
 ```
 
-Update a content item's metadata.
-
-Replaces all metadata fields. **Auto-upload mode** — pass
-``cover_image`` as a local file path or an ``http(s)://`` URL. The SDK
-uploads the image and returns the updated
-:class:`~srg.schemas.content.Content`. **Manual mode** — pass
-``cover`` to get back
-:class:`~srg.schemas.content.ContentUploadSignedUrl`.
-
-**Arguments**:
-
-- `content_id` - ID of the content item.
-- `name` - New display title.
-- `privacy` - New visibility level.
-- `details` - New body text. Pass ``None`` to clear.
-- `url` - New external URL. Pass ``None`` to clear.
-- `main_asset_id` - New primary asset ID.
-- `cover_image` - Local path or ``http(s)://`` URL of the new cover
-  image. Triggers auto-upload.
-- `cover` - Cover upload parameters (manual mode).
-- `channels` - New channel/category placements.
-- `context` - New context objects.
-- `categories` - New category assignments.
-  
-
-**Returns**:
-
-  :class:`~srg.schemas.content.Content` when ``cover_image`` is
-  provided (auto-upload mode).
-  :class:`~srg.schemas.content.ContentUploadSignedUrl` otherwise
-  (manual mode).
-  
+Async counterpart of the sync ``update``: sends ``PATCH`` with only the
+fields you pass, so the cover, main asset, channels, categories and action
+buttons are never wiped by an update that doesn't mention them. Lists you pass
+(``channels``, ``context``, ``categories``) replace the stored list.
 
 **Example**:
 
 ```python
-async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-    content = await client.contents.update(
+async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
+    await client.contents.update(
         "01965f7a-0000-7000-8000-000000000005",
-        name="Welcome to the Team (v2)",
-        privacy="Public",
-        cover_image="/path/to/new_cover.jpg",
+        context=[{"$type": "Text", "content": "New caption"}],
+        workspace_id="01965f7a-0000-7000-8000-000000000001",
     )
 ```
-  
-  Example response:
+
+<a id="srg.resources.contents.AsyncContentsResource.set_cover_from_asset"></a>
+
+#### set\_cover\_from\_asset
+
 ```python
-Content(
-    id="01965f7a-0000-7000-8000-000000000005",
-    name="Welcome to the Team (v2)",
-    hub_profile_id="01965f7a-0000-7000-8000-000000000002",
-    cover=ContentCover(
-        urls=CoverUrls(
-            original="https://cdn.srgplus.com/covers/welcome-v2.jpg",
-        ),
-        extension="jpg",
-        modified="2025-06-01T12:00:00Z",
-    ),
-    channels=[],
-)
+async def set_cover_from_asset(
+    content_id: str,
+    asset_id: str,
+    *,
+    hub_profile_id: str | None = None,
+    workspace_id: str
+) -> None
 ```
+
+Async counterpart of the sync ``set_cover_from_asset``.
+
 <a id="srg.resources.contents.AsyncContentsResource.filter"></a>
 
 #### filter
