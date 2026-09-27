@@ -484,22 +484,26 @@ client.hub_profiles.restore("01965f7a-0000-7000-8000-000000000002")
 def delete(hub_profile_id: str) -> None
 ```
 
-Permanently delete a hub profile.
+Permanently delete an archived hub profile.
 
-Removes the hub profile and all of its data. This action is
+Removes the hub profile and everything tied to it. This action is
 irreversible.
+
+Only the hub's owner, signed in with a user token (JWT), may call
+this, and only after the hub is archived. Workspace and user API keys
+are always refused, so with the API keys this client uses the call
+raises `ForbiddenError`. Permanent delete is done by the owner in
+the SRG+ app; integrations should use `archive` instead.
 
 **Arguments**:
 
 - `hub_profile_id` - ID of the hub profile to delete.
   
 
-**Example**:
+**Raises**:
 
-```python
-client = SRGClient(api_key="srgplus_your_key")
-client.hub_profiles.delete("01965f7a-0000-7000-8000-000000000002")
-```
+- `ForbiddenError` - Called with an API key (403).
+- `ConflictError` - The hub profile is not archived (409).
 <a id="srg.resources.hub_profiles.HubProfilesResource.join"></a>
 
 #### join
@@ -1093,22 +1097,26 @@ async with AsyncSRGClient(api_key="srgplus_your_key") as client:
 async def delete(hub_profile_id: str) -> None
 ```
 
-Permanently delete a hub profile.
+Permanently delete an archived hub profile.
 
-Removes the hub profile and all of its data. This action is
+Removes the hub profile and everything tied to it. This action is
 irreversible.
+
+Only the hub's owner, signed in with a user token (JWT), may call
+this, and only after the hub is archived. Workspace and user API keys
+are always refused, so with the API keys this client uses the call
+raises `ForbiddenError`. Permanent delete is done by the owner in
+the SRG+ app; integrations should use `archive` instead.
 
 **Arguments**:
 
 - `hub_profile_id` - ID of the hub profile to delete.
   
 
-**Example**:
+**Raises**:
 
-```python
-async with AsyncSRGClient(api_key="srgplus_your_key") as client:
-    await client.hub_profiles.delete("01965f7a-0000-7000-8000-000000000002")
-```
+- `ForbiddenError` - Called with an API key (403).
+- `ConflictError` - The hub profile is not archived (409).
 <a id="srg.resources.hub_profiles.AsyncHubProfilesResource.join"></a>
 
 #### join

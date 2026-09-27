@@ -571,22 +571,23 @@ class HubProfilesResource:
 
     def delete(self, hub_profile_id: str, *, workspace_id: str) -> None:
         """
-        Permanently delete a hub profile.
+        Permanently delete an archived hub profile.
 
-        Removes the hub profile and all of its data. This action is
+        Removes the hub profile and everything tied to it. This action is
         irreversible.
+
+        Only the hub's owner, signed in with a user token (JWT), may call
+        this, and only after the hub is archived. Workspace and user API keys
+        are always refused, so with the API keys this client uses the call
+        raises ``ForbiddenError``. Permanent delete is done by the owner in
+        the SRG+ app; integrations should use :meth:`archive` instead.
 
         Args:
             hub_profile_id: ID of the hub profile to delete.
 
-        Example:
-        ```python
-        client = SRGClient(api_keys=["srgplus_your_key"])
-        client.hub_profiles.delete(
-            "01965f7a-0000-7000-8000-000000000002",
-            workspace_id="01965f7a-0000-7000-8000-000000000001",
-        )
-        ```
+        Raises:
+            ForbiddenError: Called with an API key (403).
+            ConflictError: The hub profile is not archived (409).
         """
         self._get_http(workspace_id).delete(f"/api/v1/hub-profiles/{hub_profile_id}")
 
@@ -1265,22 +1266,23 @@ class AsyncHubProfilesResource:
 
     async def delete(self, hub_profile_id: str, *, workspace_id: str) -> None:
         """
-        Permanently delete a hub profile.
+        Permanently delete an archived hub profile.
 
-        Removes the hub profile and all of its data. This action is
+        Removes the hub profile and everything tied to it. This action is
         irreversible.
+
+        Only the hub's owner, signed in with a user token (JWT), may call
+        this, and only after the hub is archived. Workspace and user API keys
+        are always refused, so with the API keys this client uses the call
+        raises ``ForbiddenError``. Permanent delete is done by the owner in
+        the SRG+ app; integrations should use :meth:`archive` instead.
 
         Args:
             hub_profile_id: ID of the hub profile to delete.
 
-        Example:
-        ```python
-        async with AsyncSRGClient(api_keys=["srgplus_your_key"]) as client:
-            await client.hub_profiles.delete(
-                "01965f7a-0000-7000-8000-000000000002",
-                workspace_id="01965f7a-0000-7000-8000-000000000001",
-            )
-        ```
+        Raises:
+            ForbiddenError: Called with an API key (403).
+            ConflictError: The hub profile is not archived (409).
         """
         await self._get_http(workspace_id).delete(
             f"/api/v1/hub-profiles/{hub_profile_id}"
