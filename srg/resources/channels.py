@@ -1,5 +1,6 @@
 import builtins
 from collections.abc import AsyncIterator, Iterator
+from urllib.parse import quote
 
 from srg._http import AsyncHTTPClient, SyncHTTPClient
 from srg.exceptions import SRGError
@@ -26,6 +27,24 @@ class ChannelsResource:
 
     def _get_http(self, workspace_id: str) -> SyncHTTPClient:
         return self._registry[self._resolve_workspace_id(workspace_id)]
+
+    def _hub_profile_id(self, channel_id: str, workspace_id: str) -> str:
+        """Id of the hub profile that owns the channel.
+
+        The archive/restore endpoints need it, but GET /api/v2/channels/{id}
+        only returns the hub's user name, so the hub is looked up by that name.
+        """
+        http = self._get_http(workspace_id)
+        channel = http.get(f"/api/v2/channels/{channel_id}") or {}
+        user_name = channel.get("hubProfileUserName")
+        hub = (
+            http.get(f"/api/v1/hub-profiles/username/{quote(user_name, safe='')}")
+            if user_name
+            else None
+        ) or {}
+        if not hub.get("id"):
+            raise SRGError(f"Could not find the hub profile of channel '{channel_id}'")
+        return str(hub["id"])
 
     def create(
         self,
@@ -294,7 +313,13 @@ class ChannelsResource:
             body["privacy"] = privacy
         return self._get_http(workspace_id).put("/api/v1/channels", json=body)
 
-    def archive(self, channel_id: str, *, workspace_id: str) -> dict | None:
+    def archive(
+        self,
+        channel_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
+    ) -> dict | None:
         """
         Archive a channel.
 
@@ -303,6 +328,8 @@ class ChannelsResource:
 
         Args:
             channel_id: ID of the channel to archive.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
 
         Returns:
             ``None`` if no body is returned, otherwise a raw response dict.
@@ -316,14 +343,32 @@ class ChannelsResource:
         )
         ```
         """
+        if hub_profile_id is None:
+            hub_profile_id = self._hub_profile_id(channel_id, workspace_id)
         return self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/archive"
+            f"/api/v1/channels/{channel_id}/archive",
+            params={"hubProfileId": hub_profile_id},
         )
 
-    def restore(self, channel_id: str, *, workspace_id: str) -> dict | None:
-        """Restore a previously archived channel."""
+    def restore(
+        self,
+        channel_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
+    ) -> dict | None:
+        """Restore a previously archived channel.
+
+        Args:
+            channel_id: ID of the channel to restore.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = self._hub_profile_id(channel_id, workspace_id)
         return self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/restore"
+            f"/api/v1/channels/{channel_id}/restore",
+            params={"hubProfileId": hub_profile_id},
         )
 
     def delete(self, channel_id: str, *, workspace_id: str) -> None:
@@ -468,7 +513,12 @@ class ChannelsResource:
         )
 
     def archive_category(
-        self, channel_id: str, category_id: str, *, workspace_id: str
+        self,
+        channel_id: str,
+        category_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
     ) -> dict | None:
         """
         Archive a category.
@@ -479,6 +529,8 @@ class ChannelsResource:
         Args:
             channel_id: ID of the channel the category belongs to.
             category_id: ID of the category to archive.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
 
         Returns:
             ``None`` if no body is returned, otherwise a raw response dict.
@@ -493,16 +545,36 @@ class ChannelsResource:
         )
         ```
         """
+        if hub_profile_id is None:
+            hub_profile_id = self._hub_profile_id(channel_id, workspace_id)
+        # The only archive/restore endpoint that reads hubProfileId from a
+        # JSON body; the other three take it as a query parameter.
         return self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/{category_id}/archive"
+            f"/api/v1/channels/{channel_id}/{category_id}/archive",
+            json={"hubProfileId": hub_profile_id},
         )
 
     def restore_category(
-        self, channel_id: str, category_id: str, *, workspace_id: str
+        self,
+        channel_id: str,
+        category_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
     ) -> dict | None:
-        """Restore a previously archived category."""
+        """Restore a previously archived category.
+
+        Args:
+            channel_id: ID of the channel the category belongs to.
+            category_id: ID of the category to restore.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = self._hub_profile_id(channel_id, workspace_id)
         return self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/{category_id}/restore"
+            f"/api/v1/channels/{channel_id}/{category_id}/restore",
+            params={"hubProfileId": hub_profile_id},
         )
 
     def delete_category(
@@ -964,6 +1036,24 @@ class AsyncChannelsResource:
     def _get_http(self, workspace_id: str) -> AsyncHTTPClient:
         return self._registry[self._resolve_workspace_id(workspace_id)]
 
+    async def _hub_profile_id(self, channel_id: str, workspace_id: str) -> str:
+        """Id of the hub profile that owns the channel.
+
+        The archive/restore endpoints need it, but GET /api/v2/channels/{id}
+        only returns the hub's user name, so the hub is looked up by that name.
+        """
+        http = self._get_http(workspace_id)
+        channel = await http.get(f"/api/v2/channels/{channel_id}") or {}
+        user_name = channel.get("hubProfileUserName")
+        hub = (
+            await http.get(f"/api/v1/hub-profiles/username/{quote(user_name, safe='')}")
+            if user_name
+            else None
+        ) or {}
+        if not hub.get("id"):
+            raise SRGError(f"Could not find the hub profile of channel '{channel_id}'")
+        return str(hub["id"])
+
     async def create(
         self,
         *,
@@ -1192,7 +1282,13 @@ class AsyncChannelsResource:
             body["privacy"] = privacy
         return await self._get_http(workspace_id).put("/api/v1/channels", json=body)
 
-    async def archive(self, channel_id: str, *, workspace_id: str) -> dict | None:
+    async def archive(
+        self,
+        channel_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
+    ) -> dict | None:
         """
         Archive a channel.
 
@@ -1200,6 +1296,8 @@ class AsyncChannelsResource:
 
         Args:
             channel_id: ID of the channel to archive.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
 
         Returns:
             ``None`` if no body is returned, otherwise a raw response dict.
@@ -1213,14 +1311,32 @@ class AsyncChannelsResource:
             )
         ```
         """
+        if hub_profile_id is None:
+            hub_profile_id = await self._hub_profile_id(channel_id, workspace_id)
         return await self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/archive"
+            f"/api/v1/channels/{channel_id}/archive",
+            params={"hubProfileId": hub_profile_id},
         )
 
-    async def restore(self, channel_id: str, *, workspace_id: str) -> dict | None:
-        """Restore a previously archived channel."""
+    async def restore(
+        self,
+        channel_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
+    ) -> dict | None:
+        """Restore a previously archived channel.
+
+        Args:
+            channel_id: ID of the channel to restore.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = await self._hub_profile_id(channel_id, workspace_id)
         return await self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/restore"
+            f"/api/v1/channels/{channel_id}/restore",
+            params={"hubProfileId": hub_profile_id},
         )
 
     async def delete(self, channel_id: str, *, workspace_id: str) -> None:
@@ -1356,7 +1472,12 @@ class AsyncChannelsResource:
         )
 
     async def archive_category(
-        self, channel_id: str, category_id: str, *, workspace_id: str
+        self,
+        channel_id: str,
+        category_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
     ) -> dict | None:
         """
         Archive a category.
@@ -1364,6 +1485,8 @@ class AsyncChannelsResource:
         Args:
             channel_id: ID of the channel.
             category_id: ID of the category to archive.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
 
         Returns:
             ``None`` if no body is returned, otherwise a raw response dict.
@@ -1378,16 +1501,36 @@ class AsyncChannelsResource:
             )
         ```
         """
+        if hub_profile_id is None:
+            hub_profile_id = await self._hub_profile_id(channel_id, workspace_id)
+        # The only archive/restore endpoint that reads hubProfileId from a
+        # JSON body; the other three take it as a query parameter.
         return await self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/{category_id}/archive"
+            f"/api/v1/channels/{channel_id}/{category_id}/archive",
+            json={"hubProfileId": hub_profile_id},
         )
 
     async def restore_category(
-        self, channel_id: str, category_id: str, *, workspace_id: str
+        self,
+        channel_id: str,
+        category_id: str,
+        *,
+        workspace_id: str,
+        hub_profile_id: str | None = None,
     ) -> dict | None:
-        """Restore a previously archived category."""
+        """Restore a previously archived category.
+
+        Args:
+            channel_id: ID of the channel the category belongs to.
+            category_id: ID of the category to restore.
+            hub_profile_id: Owning hub profile. Resolved from the channel
+                when omitted (two extra GETs).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = await self._hub_profile_id(channel_id, workspace_id)
         return await self._get_http(workspace_id).post(
-            f"/api/v1/channels/{channel_id}/{category_id}/restore"
+            f"/api/v1/channels/{channel_id}/{category_id}/restore",
+            params={"hubProfileId": hub_profile_id},
         )
 
     async def delete_category(
