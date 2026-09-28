@@ -1,5 +1,8 @@
 from unittest.mock import AsyncMock, Mock
 
+import pytest
+
+from srg.exceptions import SRGError
 from srg.resources.channels import AsyncChannelsResource, ChannelsResource
 from srg.schemas.channel import CategoryToReorder
 
@@ -222,3 +225,121 @@ class TestAsyncChannels:
 
         assert len(result) == 3
         assert async_mock_http.get.call_count == 2
+
+
+# --- archive / restore send the owning hubProfileId (SRGDEV-856) ---
+# Without it the backend answers a bare 400. archive_category reads it from the
+# JSON body; restore_category, archive and restore read it from the query.
+
+WS = "workspace-uuid-1"
+CATEGORY_ID = "category-uuid-1"
+HUB_USER_NAME = "acme-academy"
+LOOKUPS = {
+    f"/api/v2/channels/{CHANNEL_ID}": {
+        "id": CHANNEL_ID,
+        "hubProfileUserName": HUB_USER_NAME,
+    },
+    f"/api/v1/hub-profiles/username/{HUB_USER_NAME}": {"id": HUB_PROFILE_ID},
+}
+SHAPES = [
+    (
+        "archive_category",
+        (CHANNEL_ID, CATEGORY_ID),
+        f"/api/v1/channels/{CHANNEL_ID}/{CATEGORY_ID}/archive",
+        {"json": {"hubProfileId": HUB_PROFILE_ID}},
+    ),
+    (
+        "restore_category",
+        (CHANNEL_ID, CATEGORY_ID),
+        f"/api/v1/channels/{CHANNEL_ID}/{CATEGORY_ID}/restore",
+        {"params": {"hubProfileId": HUB_PROFILE_ID}},
+    ),
+    (
+        "archive",
+        (CHANNEL_ID,),
+        f"/api/v1/channels/{CHANNEL_ID}/archive",
+        {"params": {"hubProfileId": HUB_PROFILE_ID}},
+    ),
+    (
+        "restore",
+        (CHANNEL_ID,),
+        f"/api/v1/channels/{CHANNEL_ID}/restore",
+        {"params": {"hubProfileId": HUB_PROFILE_ID}},
+    ),
+]
+
+
+class TestArchiveRestoreHubProfileId:
+    @pytest.mark.parametrize(("method", "args", "path", "shape"), SHAPES)
+    def test_explicit_hub_profile_id(
+        self, mock_http: Mock, method: str, args: tuple, path: str, shape: dict
+    ) -> None:
+        mock_http.post.return_value = None
+        resource = ChannelsResource({WS: mock_http})
+
+        getattr(resource, method)(*args, workspace_id=WS, hub_profile_id=HUB_PROFILE_ID)
+
+        mock_http.post.assert_called_once_with(path, **shape)
+        mock_http.get.assert_not_called()
+
+    @pytest.mark.parametrize(("method", "args", "path", "shape"), SHAPES)
+    def test_hub_profile_id_resolved_from_channel(
+        self, mock_http: Mock, method: str, args: tuple, path: str, shape: dict
+    ) -> None:
+        mock_http.get.side_effect = lambda p, **_: LOOKUPS[p]
+        mock_http.post.return_value = None
+        resource = ChannelsResource({WS: mock_http})
+
+        getattr(resource, method)(*args, workspace_id=WS)
+
+        assert [c.args[0] for c in mock_http.get.call_args_list] == list(LOOKUPS)
+        mock_http.post.assert_called_once_with(path, **shape)
+
+    @pytest.mark.parametrize(("method", "args", "path", "shape"), SHAPES)
+    def test_unresolved_hub_raises_before_posting(
+        self, mock_http: Mock, method: str, args: tuple, path: str, shape: dict
+    ) -> None:
+        mock_http.get.return_value = {"id": CHANNEL_ID, "hubProfileUserName": None}
+        resource = ChannelsResource({WS: mock_http})
+
+        with pytest.raises(SRGError, match="hub profile of channel"):
+            getattr(resource, method)(*args, workspace_id=WS)
+
+        mock_http.post.assert_not_called()
+
+    @pytest.mark.parametrize(("method", "args", "path", "shape"), SHAPES)
+    async def test_async_hub_profile_id_resolved_from_channel(
+        self,
+        async_mock_http: AsyncMock,
+        method: str,
+        args: tuple,
+        path: str,
+        shape: dict,
+    ) -> None:
+        async_mock_http.get.side_effect = lambda p, **_: LOOKUPS[p]
+        async_mock_http.post.return_value = None
+        resource = AsyncChannelsResource({WS: async_mock_http})
+
+        await getattr(resource, method)(*args, workspace_id=WS)
+
+        assert [c.args[0] for c in async_mock_http.get.call_args_list] == list(LOOKUPS)
+        async_mock_http.post.assert_called_once_with(path, **shape)
+
+    @pytest.mark.parametrize(("method", "args", "path", "shape"), SHAPES)
+    async def test_async_explicit_hub_profile_id(
+        self,
+        async_mock_http: AsyncMock,
+        method: str,
+        args: tuple,
+        path: str,
+        shape: dict,
+    ) -> None:
+        async_mock_http.post.return_value = None
+        resource = AsyncChannelsResource({WS: async_mock_http})
+
+        await getattr(resource, method)(
+            *args, workspace_id=WS, hub_profile_id=HUB_PROFILE_ID
+        )
+
+        async_mock_http.post.assert_called_once_with(path, **shape)
+        async_mock_http.get.assert_not_called()
