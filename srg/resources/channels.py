@@ -379,8 +379,8 @@ class ChannelsResource:
         contents in it are NOT deleted: they only lose their placements in
         this channel and stay in the hub, in Drive and in other channels.
         Only an archived channel can be deleted (archive it first); a live
-        one raises a 409 conflict. Needs the hub owner or admin rights, the
-        same as archive. This action is irreversible.
+        one raises a 409 conflict. Only the hub owner or an admin can delete
+        (editors can archive, not delete). This action is irreversible.
 
         Args:
             channel_id: ID of the channel to delete.
@@ -591,7 +591,7 @@ class ChannelsResource:
         deleted: they only lose their placements in this category and stay in
         the hub, in Drive and in other categories. Only an archived category
         can be deleted (archive it first); a live one raises a 409 conflict.
-        This action is irreversible.
+        Only the hub owner or an admin can delete. This action is irreversible.
 
         Args:
             channel_id: ID of the channel the category belongs to.
@@ -1354,8 +1354,8 @@ class AsyncChannelsResource:
         contents in it are NOT deleted: they only lose their placements in
         this channel and stay in the hub, in Drive and in other channels.
         Only an archived channel can be deleted (archive it first); a live
-        one raises a 409 conflict. Needs the hub owner or admin rights, the
-        same as archive. This action is irreversible.
+        one raises a 409 conflict. Only the hub owner or an admin can delete
+        (editors can archive, not delete). This action is irreversible.
 
         Args:
             channel_id: ID of the channel to delete.
@@ -1554,7 +1554,7 @@ class AsyncChannelsResource:
         deleted: they only lose their placements in this category and stay in
         the hub, in Drive and in other categories. Only an archived category
         can be deleted (archive it first); a live one raises a 409 conflict.
-        This action is irreversible.
+        Only the hub owner or an admin can delete. This action is irreversible.
 
         Args:
             channel_id: ID of the channel.
