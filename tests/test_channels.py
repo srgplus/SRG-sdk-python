@@ -343,3 +343,36 @@ class TestArchiveRestoreHubProfileId:
 
         async_mock_http.post.assert_called_once_with(path, **shape)
         async_mock_http.get.assert_not_called()
+
+
+class TestChannelsDelete:
+    """SRGDEV-921: delete an archived channel / category with the real routes."""
+
+    def test_delete_channel_route(self, mock_http: Mock) -> None:
+        mock_http.delete.return_value = None
+        ChannelsResource({"workspace-uuid-1": mock_http}).delete(
+            CHANNEL_ID, workspace_id="workspace-uuid-1"
+        )
+
+        mock_http.delete.assert_called_once_with(f"/api/v1/channels/{CHANNEL_ID}")
+
+    def test_delete_category_route(self, mock_http: Mock) -> None:
+        mock_http.delete.return_value = None
+        ChannelsResource({"workspace-uuid-1": mock_http}).delete_category(
+            CHANNEL_ID, "category-uuid-1", workspace_id="workspace-uuid-1"
+        )
+
+        mock_http.delete.assert_called_once_with(
+            f"/api/v1/channels/{CHANNEL_ID}/categories/category-uuid-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_async_delete_category_route(self, async_mock_http: AsyncMock) -> None:
+        async_mock_http.delete.return_value = None
+        await AsyncChannelsResource({"workspace-uuid-1": async_mock_http}).delete_category(
+            CHANNEL_ID, "category-uuid-1", workspace_id="workspace-uuid-1"
+        )
+
+        async_mock_http.delete.assert_called_once_with(
+            f"/api/v1/channels/{CHANNEL_ID}/categories/category-uuid-1"
+        )
