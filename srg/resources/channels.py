@@ -373,10 +373,14 @@ class ChannelsResource:
 
     def delete(self, channel_id: str, *, workspace_id: str) -> None:
         """
-        Permanently delete a channel.
+        Permanently delete an archived channel.
 
-        Removes the channel and all of its categories, sections, and content
-        references. This action is irreversible.
+        Removes the channel and all of its categories and sections. The
+        contents in it are NOT deleted: they only lose their placements in
+        this channel and stay in the hub, in Drive and in other channels.
+        Only an archived channel can be deleted (archive it first); a live
+        one raises a 409 conflict. Needs the hub owner or admin rights, the
+        same as archive. This action is irreversible.
 
         Args:
             channel_id: ID of the channel to delete.
@@ -581,9 +585,12 @@ class ChannelsResource:
         self, channel_id: str, category_id: str, *, workspace_id: str
     ) -> None:
         """
-        Permanently delete a category from a channel.
+        Permanently delete an archived category from a channel.
 
-        Removes the category and all of its sections and content references.
+        Removes the category and its sections. The contents in it are NOT
+        deleted: they only lose their placements in this category and stay in
+        the hub, in Drive and in other categories. Only an archived category
+        can be deleted (archive it first); a live one raises a 409 conflict.
         This action is irreversible.
 
         Args:
@@ -601,7 +608,7 @@ class ChannelsResource:
         ```
         """
         self._get_http(workspace_id).delete(
-            f"/api/v1/channels/{channel_id}/{category_id}"
+            f"/api/v1/channels/{channel_id}/categories/{category_id}"
         )
 
     def get_category_references(
@@ -1341,10 +1348,14 @@ class AsyncChannelsResource:
 
     async def delete(self, channel_id: str, *, workspace_id: str) -> None:
         """
-        Permanently delete a channel.
+        Permanently delete an archived channel.
 
-        Removes the channel and all of its categories, sections, and content
-        references. This action is irreversible.
+        Removes the channel and all of its categories and sections. The
+        contents in it are NOT deleted: they only lose their placements in
+        this channel and stay in the hub, in Drive and in other channels.
+        Only an archived channel can be deleted (archive it first); a live
+        one raises a 409 conflict. Needs the hub owner or admin rights, the
+        same as archive. This action is irreversible.
 
         Args:
             channel_id: ID of the channel to delete.
@@ -1537,7 +1548,13 @@ class AsyncChannelsResource:
         self, channel_id: str, category_id: str, *, workspace_id: str
     ) -> None:
         """
-        Permanently delete a category from a channel.
+        Permanently delete an archived category from a channel.
+
+        Removes the category and its sections. The contents in it are NOT
+        deleted: they only lose their placements in this category and stay in
+        the hub, in Drive and in other categories. Only an archived category
+        can be deleted (archive it first); a live one raises a 409 conflict.
+        This action is irreversible.
 
         Args:
             channel_id: ID of the channel.
@@ -1554,7 +1571,7 @@ class AsyncChannelsResource:
         ```
         """
         await self._get_http(workspace_id).delete(
-            f"/api/v1/channels/{channel_id}/{category_id}"
+            f"/api/v1/channels/{channel_id}/categories/{category_id}"
         )
 
     async def get_category_references(
