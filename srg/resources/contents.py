@@ -30,6 +30,7 @@ from srg.schemas.content import (
     ContentSearch,
     ContentUploadSignedUrl,
     ContentV2,
+    CoverPreset,
     CreatedSection,
     SubcontentItem,
 )
@@ -430,7 +431,8 @@ class ContentsResource:
         signed URL so you can upload the image yourself.
 
         To use an image that is already in the hub Drive as the cover, call
-        :meth:`set_cover_from_asset` instead.
+        :meth:`set_cover_from_asset` instead; for a ready-made gradient cover,
+        :meth:`set_cover_from_preset`.
 
         Args:
             content_id: ID of the content item to update.
@@ -538,6 +540,64 @@ class ContentsResource:
         self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/cover/from-asset",
             json={"coverAssetId": asset_id},
+            params={"hubProfileId": hub_profile_id},
+        )
+
+    def list_cover_presets(self, *, workspace_id: str) -> list[CoverPreset]:
+        """
+        List the ready-made gradient covers a content can use.
+
+        Calls ``GET /api/v1/contents/cover-presets``. The presets come back
+        in display order. Each has an ``id`` (what :meth:`set_cover_from_preset`
+        takes), a ``name``, a ~400 px ``preview_url`` for browsing and the
+        1600 px original ``url``; both URLs are public.
+
+        Returns:
+            list[CoverPreset]: the presets, in display order.
+
+        Example:
+        ```python
+        client = SRGClient(api_keys=["srgplus_your_key"])
+        presets = client.contents.list_cover_presets(
+            workspace_id="01965f7a-0000-7000-8000-000000000001",
+        )
+        print([p.id for p in presets])  # ['pearl', 'champagne', ...]
+        ```
+        """
+        data = self._get_http(workspace_id).get("/api/v1/contents/cover-presets")
+        return [CoverPreset.model_validate(item) for item in (data or [])]
+
+    def set_cover_from_preset(
+        self,
+        content_id: str,
+        preset_id: str,
+        *,
+        hub_profile_id: str | None = None,
+        workspace_id: str,
+    ) -> None:
+        """
+        Use one of the ready-made gradient covers as the content's cover.
+
+        Calls ``POST /api/v1/contents/{id}/cover/from-preset`` with
+        ``{"presetId": ...}``. Same auth, permissions and errors as
+        :meth:`set_cover_from_asset` (400 for an unknown preset, 403, 404, 409
+        on a version conflict). The content's current cover is replaced. No
+        upload is involved, so there is no "still uploading" wait.
+
+        Args:
+            content_id: ID of the content item.
+            preset_id: A preset ``id`` from :meth:`list_cover_presets`, e.g.
+                ``"pearl"``.
+            hub_profile_id: Owning hub profile. Resolved from the content
+                when omitted (one extra GET).
+        """
+        if hub_profile_id is None:
+            hub_profile_id = self.get_v2(
+                content_id, workspace_id=workspace_id
+            ).hub_profile_id
+        self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/cover/from-preset",
+            json={"presetId": preset_id},
             params={"hubProfileId": hub_profile_id},
         )
 
@@ -1706,6 +1766,30 @@ class AsyncContentsResource:
         await self._get_http(workspace_id).post(
             f"/api/v1/contents/{content_id}/cover/from-asset",
             json={"coverAssetId": asset_id},
+            params={"hubProfileId": hub_profile_id},
+        )
+
+    async def list_cover_presets(self, *, workspace_id: str) -> list[CoverPreset]:
+        """Async counterpart of :meth:`ContentsResource.list_cover_presets`."""
+        data = await self._get_http(workspace_id).get("/api/v1/contents/cover-presets")
+        return [CoverPreset.model_validate(item) for item in (data or [])]
+
+    async def set_cover_from_preset(
+        self,
+        content_id: str,
+        preset_id: str,
+        *,
+        hub_profile_id: str | None = None,
+        workspace_id: str,
+    ) -> None:
+        """Async counterpart of :meth:`ContentsResource.set_cover_from_preset`."""
+        if hub_profile_id is None:
+            hub_profile_id = (
+                await self.get_v2(content_id, workspace_id=workspace_id)
+            ).hub_profile_id
+        await self._get_http(workspace_id).post(
+            f"/api/v1/contents/{content_id}/cover/from-preset",
+            json={"presetId": preset_id},
             params={"hubProfileId": hub_profile_id},
         )
 

@@ -58,6 +58,7 @@ from srg.schemas import (
     Cover,
     CoverDetails,
     CoverOptions,
+    CoverPreset,
     CoverUrls,
     CreatedSection,
     CursorPagedList,
@@ -243,6 +244,7 @@ __all__ = [
     "Content",
     "ContentSearch",
     "ContentUploadSignedUrl",
+    "CoverPreset",
     "ContentProgression",
     "CollectionProgressionStats",
     # content v2 models
