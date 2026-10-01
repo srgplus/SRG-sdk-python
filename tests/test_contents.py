@@ -6,7 +6,7 @@ import pytest
 from srg.exceptions import SRGError
 from srg.resources.contents import AsyncContentsResource, ContentsResource
 from srg.schemas.common import ContentFileUploadParameters
-from srg.schemas.content import ContentChannelUpsert
+from srg.schemas.content import ContentChannelUpsert, CoverPreset
 
 CONTENT_ID = "content-uuid-1"
 HUB_PROFILE_ID = "hub-profile-uuid-1"
@@ -27,6 +27,22 @@ UPLOAD_SIGNED_URL_PAYLOAD = {
     "context": [],
     "metadataHeaders": None,
 }
+
+
+COVER_PRESETS_PAYLOAD = [
+    {
+        "id": "pearl",
+        "name": "Pearl",
+        "previewUrl": "https://cdn.example/presets/pearl-400.jpg",
+        "url": "https://cdn.example/presets/pearl-1600.jpg",
+    },
+    {
+        "id": "champagne",
+        "name": "Champagne",
+        "previewUrl": "https://cdn.example/presets/champagne-400.jpg",
+        "url": "https://cdn.example/presets/champagne-1600.jpg",
+    },
+]
 
 
 class TestContentsCreate:
@@ -549,6 +565,89 @@ class TestContentsSetCoverFromAsset:
         assert mock_http.post.call_args[1]["params"] == {"hubProfileId": HUB_PROFILE_ID}
 
 
+class TestContentsCoverPresets:
+    def test_list_returns_models_in_order(self, mock_http: Mock) -> None:
+        mock_http.get.return_value = COVER_PRESETS_PAYLOAD
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        presets = resource.list_cover_presets(workspace_id="workspace-uuid-1")
+
+        mock_http.get.assert_called_once_with("/api/v1/contents/cover-presets")
+        assert [p.id for p in presets] == ["pearl", "champagne"]
+        assert all(isinstance(p, CoverPreset) for p in presets)
+        assert presets[0].name == "Pearl"
+        assert presets[0].preview_url == "https://cdn.example/presets/pearl-400.jpg"
+        assert presets[0].url == "https://cdn.example/presets/pearl-1600.jpg"
+
+    def test_list_handles_an_empty_answer(self, mock_http: Mock) -> None:
+        mock_http.get.return_value = None
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        assert resource.list_cover_presets(workspace_id="workspace-uuid-1") == []
+
+    def test_preset_model_is_exported_from_the_package(self) -> None:
+        import srg
+        import srg.schemas
+
+        assert srg.CoverPreset is CoverPreset
+        assert srg.schemas.CoverPreset is CoverPreset
+
+    def test_set_cover_from_preset_posts_the_preset_id(self, mock_http: Mock) -> None:
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        result = resource.set_cover_from_preset(
+            CONTENT_ID,
+            "pearl",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        assert result is None
+        mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/cover/from-preset",
+            json={"presetId": "pearl"},
+            params={"hubProfileId": HUB_PROFILE_ID},
+        )
+        mock_http.get.assert_not_called()
+
+    def test_set_cover_from_preset_resolves_hub_profile_when_missing(
+        self, mock_http: Mock, content_v2_payload: dict
+    ) -> None:
+        mock_http.get.return_value = content_v2_payload
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        resource.set_cover_from_preset(
+            CONTENT_ID, "mint", workspace_id="workspace-uuid-1"
+        )
+
+        assert mock_http.post.call_args[1]["params"] == {"hubProfileId": HUB_PROFILE_ID}
+        assert mock_http.post.call_args[1]["json"] == {"presetId": "mint"}
+
+    @pytest.mark.parametrize(
+        "error", [SRGError("HTTP 400: unknown preset"), SRGError("HTTP 409: stale")]
+    )
+    def test_set_cover_from_preset_lets_backend_errors_through(
+        self, mock_http: Mock, error: SRGError
+    ) -> None:
+        mock_http.post.side_effect = error
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        with pytest.raises(SRGError):
+            resource.set_cover_from_preset(
+                CONTENT_ID,
+                "nope",
+                hub_profile_id=HUB_PROFILE_ID,
+                workspace_id="workspace-uuid-1",
+            )
+        mock_http.post.assert_called_once()
+
+    def test_unknown_workspace_is_refused(self, mock_http: Mock) -> None:
+        resource = ContentsResource({"workspace-uuid-1": mock_http})
+
+        with pytest.raises(SRGError, match="No API key registered"):
+            resource.list_cover_presets(workspace_id="other-workspace")
+
+
 class TestAsyncContentsUpdatePatch:
     """Async mirror of TestContentsUpdatePatch."""
 
@@ -617,6 +716,68 @@ class TestAsyncContentsUpdatePatch:
             json={"coverAssetId": "asset-9"},
             params={"hubProfileId": HUB_PROFILE_ID},
         )
+
+    async def test_list_cover_presets(self, async_mock_http: AsyncMock) -> None:
+        async_mock_http.get.return_value = COVER_PRESETS_PAYLOAD
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        presets = await resource.list_cover_presets(workspace_id="workspace-uuid-1")
+
+        async_mock_http.get.assert_called_once_with("/api/v1/contents/cover-presets")
+        assert [p.id for p in presets] == ["pearl", "champagne"]
+        assert presets[1].preview_url == "https://cdn.example/presets/champagne-400.jpg"
+
+    async def test_list_cover_presets_handles_an_empty_answer(
+        self, async_mock_http: AsyncMock
+    ) -> None:
+        async_mock_http.get.return_value = None
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        assert await resource.list_cover_presets(workspace_id="workspace-uuid-1") == []
+
+    async def test_set_cover_from_preset(self, async_mock_http: AsyncMock) -> None:
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        await resource.set_cover_from_preset(
+            CONTENT_ID,
+            "pearl",
+            hub_profile_id=HUB_PROFILE_ID,
+            workspace_id="workspace-uuid-1",
+        )
+
+        async_mock_http.post.assert_called_once_with(
+            f"/api/v1/contents/{CONTENT_ID}/cover/from-preset",
+            json={"presetId": "pearl"},
+            params={"hubProfileId": HUB_PROFILE_ID},
+        )
+
+    async def test_set_cover_from_preset_resolves_hub_profile_when_missing(
+        self, async_mock_http: AsyncMock, content_v2_payload: dict
+    ) -> None:
+        async_mock_http.get.return_value = content_v2_payload
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        await resource.set_cover_from_preset(
+            CONTENT_ID, "alpine", workspace_id="workspace-uuid-1"
+        )
+
+        assert async_mock_http.post.call_args[1]["params"] == {
+            "hubProfileId": HUB_PROFILE_ID
+        }
+
+    async def test_set_cover_from_preset_lets_backend_errors_through(
+        self, async_mock_http: AsyncMock
+    ) -> None:
+        async_mock_http.post.side_effect = SRGError("HTTP 404: content not found")
+        resource = AsyncContentsResource({"workspace-uuid-1": async_mock_http})
+
+        with pytest.raises(SRGError, match="404"):
+            await resource.set_cover_from_preset(
+                CONTENT_ID,
+                "pearl",
+                hub_profile_id=HUB_PROFILE_ID,
+                workspace_id="workspace-uuid-1",
+            )
 
 
 class TestAsyncContentsCreate:

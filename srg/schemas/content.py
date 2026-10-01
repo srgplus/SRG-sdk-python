@@ -129,6 +129,19 @@ class ContentUploadSignedUrl(SRGModel):
     metadata_headers: dict[str, str] | None = None
 
 
+class CoverPreset(SRGModel):
+    """One ready-made gradient cover (GET /api/v1/contents/cover-presets).
+
+    ``preview_url`` is a ~400 px image for browsing, ``url`` the 1600 px
+    original. Both are public. ``id`` is what ``set_cover_from_preset`` takes.
+    """
+
+    id: str
+    name: str
+    preview_url: str
+    url: str
+
+
 class ContentProgression(SRGModel):
     status: str | None = None
 

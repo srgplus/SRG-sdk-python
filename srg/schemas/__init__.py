@@ -66,6 +66,7 @@ from .content import (
     ContentUploadSignedUrl,
     ContentV2,
     ContentWidgetCreate,
+    CoverPreset,
     CreatedSection,
     HubProfileWidgetCreate,
     LinkListCreate,
@@ -225,6 +226,7 @@ __all__ = [
     "Content",
     "ContentSearch",
     "ContentUploadSignedUrl",
+    "CoverPreset",
     "ContentProgression",
     "CollectionProgressionStats",
     # content v2

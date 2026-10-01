@@ -222,7 +222,8 @@ from the bytes. The SDK uploads the image and returns the updated
 can upload the image yourself.
 
 To use an image that is already in the hub Drive, call
-``set_cover_from_asset`` instead.
+``set_cover_from_asset`` instead; for a ready-made gradient cover,
+``set_cover_from_preset``.
 
 **Arguments**:
 
@@ -292,6 +293,72 @@ image = client.assets.upload(
 client.contents.set_cover_from_asset(
     "01965f7a-0000-7000-8000-000000000005",
     image.id,
+    workspace_id="01965f7a-0000-7000-8000-000000000001",
+)
+```
+
+<a id="srg.resources.contents.ContentsResource.list_cover_presets"></a>
+
+#### list\_cover\_presets
+
+```python
+def list_cover_presets(*, workspace_id: str) -> list[CoverPreset]
+```
+
+List the ready-made gradient covers a content can use
+(``GET /api/v1/contents/cover-presets``). The presets come back in display
+order. Each has an ``id`` (what ``set_cover_from_preset`` takes), a ``name``,
+a ~400 px ``preview_url`` for browsing and the 1600 px original ``url``; both
+URLs are public.
+
+**Returns**:
+
+`list[CoverPreset]` - the presets, in display order.
+
+**Example**:
+
+```python
+client = SRGClient(api_keys=["srgplus_your_key"])
+presets = client.contents.list_cover_presets(
+    workspace_id="01965f7a-0000-7000-8000-000000000001",
+)
+print([p.id for p in presets])  # ['pearl', 'champagne', ...]
+```
+
+<a id="srg.resources.contents.ContentsResource.set_cover_from_preset"></a>
+
+#### set\_cover\_from\_preset
+
+```python
+def set_cover_from_preset(
+    content_id: str,
+    preset_id: str,
+    *,
+    hub_profile_id: str | None = None,
+    workspace_id: str
+) -> None
+```
+
+Use one of the ready-made gradient covers as the content's cover
+(``POST /api/v1/contents/{id}/cover/from-preset`` with ``{"presetId": ...}``).
+Same auth, permissions and errors as ``set_cover_from_asset`` (400 for an
+unknown preset, 403, 404, 409 on a version conflict). The content's current
+cover is replaced. No upload is involved, so there is no "still uploading"
+wait.
+
+**Arguments**:
+
+- `content_id` - ID of the content item.
+- `preset_id` - A preset ``id`` from ``list_cover_presets``, e.g. ``"pearl"``.
+- `hub_profile_id` - Owning hub profile. Resolved from the content when
+  omitted (one extra GET).
+
+**Example**:
+
+```python
+client.contents.set_cover_from_preset(
+    "01965f7a-0000-7000-8000-000000000005",
+    "pearl",
     workspace_id="01965f7a-0000-7000-8000-000000000001",
 )
 ```
@@ -1033,6 +1100,32 @@ async def set_cover_from_asset(
 ```
 
 Async counterpart of the sync ``set_cover_from_asset``.
+
+<a id="srg.resources.contents.AsyncContentsResource.list_cover_presets"></a>
+
+#### list\_cover\_presets
+
+```python
+async def list_cover_presets(*, workspace_id: str) -> list[CoverPreset]
+```
+
+Async counterpart of the sync ``list_cover_presets``.
+
+<a id="srg.resources.contents.AsyncContentsResource.set_cover_from_preset"></a>
+
+#### set\_cover\_from\_preset
+
+```python
+async def set_cover_from_preset(
+    content_id: str,
+    preset_id: str,
+    *,
+    hub_profile_id: str | None = None,
+    workspace_id: str
+) -> None
+```
+
+Async counterpart of the sync ``set_cover_from_preset``.
 
 <a id="srg.resources.contents.AsyncContentsResource.filter"></a>
 

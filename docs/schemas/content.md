@@ -131,6 +131,22 @@ GET /api/v2/contents/\{contentId\}
 - **title** (*str | None, optional*) – Defaults to `None`.
 - **content_id** (*str*)
 
+## CoverPreset
+
+*model* `CoverPreset(id, name, preview_url, url)`
+
+One ready-made gradient cover (GET /api/v1/contents/cover-presets).
+
+`preview_url` is a ~400 px image for browsing, `url` the 1600 px original.
+Both are public. `id` is what `set_cover_from_preset` takes.
+
+**Fields**
+
+- **id** (*str*)
+- **name** (*str*)
+- **preview_url** (*str*)
+- **url** (*str*)
+
 ## CustomLinkCreate
 
 *model* `CustomLinkCreate(dollar_type='CustomLink', label, url)`
